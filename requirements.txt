@@ -1,0 +1,5 @@
+botcity-framework-core
+opencv-python
+pillow
+python-dotenv
+playwright
