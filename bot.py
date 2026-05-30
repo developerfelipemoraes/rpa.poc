@@ -274,28 +274,32 @@ class DominioBot(DesktopBot):
         print("  Aguardando o modulo Contabilidade terminar de carregar (15s)...")
         self.wait(15000)
 
-        # 1. Fecha popups de erro conhecidos (Erro / Busca Convencoes / etc).
+        # Fecha popups e o Dashboard que bloqueiam a tela principal do Contabilidade
         self._dismiss_any_known_dialog()
-
-        # 2. Fecha a janela 'Dashboard' que abre por default e bloqueia o menu
-        # de selecao de empresa. Usa win32 WM_CLOSE (titulo exato).
         if self._close_window_by_title("Dashboard"):
-            print("  Janela 'Dashboard' fechada (estava bloqueando o menu de empresa).")
+            print("  Janela 'Dashboard' fechada (estava bloqueando o menu).")
         self.wait(2000)
-
-        # 3. Re-tenta dismiss caso outro erro tenha aparecido apos fechar o Dashboard.
         self._dismiss_any_known_dialog()
         self.wait(1000)
 
-        if not self._find_or_debug("menu_empresa", "resources/menu_empresa.png",
-                                   matching=0.80, waiting=45000, label="menu Empresa"):
+        # F8 = atalho do Dominio Contabilidade pra abrir o dialogo de selecao
+        # de empresa. Muito mais robusto que image matching do menu.
+        empresa = os.getenv("EMPRESA_CODIGO", "").strip()
+        if not empresa:
+            print("  ERRO: EMPRESA_CODIGO nao definido no .env (precisa do codigo da empresa).")
             return False
-        self.click()
+
+        print(f"  F8 -> abrindo dialogo de empresa (alvo: {empresa})...")
+        self.key_f8()
+        self.wait(2000)
+
+        print(f"  Digitando codigo {empresa} + ENTER...")
+        self.kb_type(empresa)
         self.wait(500)
-        # TODO: selecionar a empresa-alvo. Opcoes:
-        #   por imagem:  self._find_or_debug("empresa_alvo", "resources/empresa_alvo.png") + self.double_click()
-        #   por codigo:  self.kb_type(os.getenv("EMPRESA_CODIGO", "")); self.enter()
-        print("  OK: empresa selecionada.")
+        self.enter()
+        self.wait(3000)
+
+        print(f"  OK: empresa {empresa} selecionada (via F8).")
         return True
 
     # ------------------------------------------------------------------
