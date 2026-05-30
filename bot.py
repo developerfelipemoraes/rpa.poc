@@ -171,6 +171,11 @@ class DominioBot(DesktopBot):
     # screenshot de debug (padronza o tratamento "caso algo quebre").
     # ------------------------------------------------------------------
     def _find_or_debug(self, name, path, matching=0.80, waiting=30000, label=""):
+        # SEMPRE dismissa dialogos conhecidos primeiro - mesmo nos passos novos
+        # onde o PNG-template ainda nao existe, queremos que o debug seja salvo
+        # da tela SEM o popup (pra a gente conseguir capturar o elemento real).
+        self._dismiss_any_known_dialog()
+
         # Se o PNG-template ainda nao existe (passo novo sem captura), salva
         # um screenshot da tela atual pra identificar o elemento a capturar.
         if not os.path.isfile(path):
@@ -182,10 +187,6 @@ class DominioBot(DesktopBot):
                 print(f"  WARN: nao consegui salvar screenshot: {e}")
             print(f"  ERRO: PNG '{path}' nao existe. Capture a tela atual ({shot}) pra gerar o template.")
             return False
-
-        # Defensivo: se algum dialogo transient conhecido ja estiver pop-up'ado,
-        # dismissa antes de procurar.
-        self._dismiss_any_known_dialog()
 
         self.add_image(name, path)
 
