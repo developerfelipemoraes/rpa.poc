@@ -283,23 +283,39 @@ class DominioBot(DesktopBot):
         self.wait(1000)
 
         # F8 = atalho do Dominio Contabilidade pra abrir o dialogo de selecao
-        # de empresa. Muito mais robusto que image matching do menu.
+        # de empresa. Sequencia: F8 -> ALT+C (radio 'Codigo') -> TAB (caixa de
+        # texto) -> digita codigo -> ENTER (seleciona empresa highlighted, eh
+        # equivalente ao duplo-clique na empresa filtrada).
         empresa = os.getenv("EMPRESA_CODIGO", "").strip()
         if not empresa:
             print("  ERRO: EMPRESA_CODIGO nao definido no .env (precisa do codigo da empresa).")
             return False
 
-        print(f"  F8 -> abrindo dialogo de empresa (alvo: {empresa})...")
+        print(f"  F8 -> abrindo dialogo de empresa (alvo: codigo {empresa})...")
         self.key_f8()
-        self.wait(2000)
+        self.wait(2500)
 
-        print(f"  Digitando codigo {empresa} + ENTER...")
+        # ALT+C = mnemonic do radio 'Codigo' (C sublinhado). Idempotente:
+        # se ja estiver selecionado, nada muda.
+        print("  ALT+C -> garantindo modo de busca por 'Codigo'...")
+        self.key_combo("alt+c")
+        self.wait(600)
+
+        # TAB sai do radio e cai na caixa de texto do filtro.
+        self.tab()
+        self.wait(300)
+
+        # Digita o codigo da empresa - lista filtra em tempo real.
+        print(f"  Digitando codigo {empresa}...")
         self.kb_type(empresa)
-        self.wait(500)
+        self.wait(2500)  # tempo da lista filtrar
+
+        # ENTER = seleciona empresa highlighted (equivalente ao duplo-clique).
+        print("  ENTER -> selecionando empresa filtrada (equivale a duplo-clique)...")
         self.enter()
         self.wait(3000)
 
-        print(f"  OK: empresa {empresa} selecionada (via F8).")
+        print(f"  OK: empresa {empresa} selecionada (via F8 + ALT+C + ENTER).")
         return True
 
     # ------------------------------------------------------------------
