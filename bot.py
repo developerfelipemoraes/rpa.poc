@@ -183,18 +183,30 @@ class DominioBot(DesktopBot):
             print(f"  ERRO: PNG '{path}' nao existe. Capture a tela atual ({shot}) pra gerar o template.")
             return False
 
-        # Defensivo: se algum dialogo transient conhecido tiver pop-up'ado por cima,
-        # dismissa antes de procurar (senao o elemento alvo fica escondido).
+        # Defensivo: se algum dialogo transient conhecido ja estiver pop-up'ado,
+        # dismissa antes de procurar.
         self._dismiss_any_known_dialog()
 
         self.add_image(name, path)
-        if not self.find(name, matching=matching, waiting_time=waiting):
-            ts = datetime.now().strftime("%H%M%S")
-            shot = f"debug_{name}_{ts}.png"
-            self.screenshot(shot)
-            print(f"  ERRO: '{label or name}' nao encontrado. Debug: {shot}")
-            return False
-        return True
+
+        # Polling: procura em chunks de 5s, intercalando com quick-dismiss (500ms).
+        # Captura dialogos transient que aparecam DURANTE a espera, nao so antes.
+        poll_ms = 5000
+        elapsed = 0
+        while elapsed < waiting:
+            chunk = min(poll_ms, waiting - elapsed)
+            if self.find(name, matching=matching, waiting_time=chunk):
+                return True
+            elapsed += chunk
+            if elapsed < waiting:
+                # chunk falhou - pode ter aparecido dialog blocking. Quick check.
+                self._dismiss_any_known_dialog(waiting=500)
+
+        ts = datetime.now().strftime("%H%M%S")
+        shot = f"debug_{name}_{ts}.png"
+        self.screenshot(shot)
+        print(f"  ERRO: '{label or name}' nao encontrado. Debug: {shot}")
+        return False
 
     # ------------------------------------------------------------------
     # Helper: detecta dialogo opcional (erro/aviso transient) e dismissa
@@ -212,11 +224,12 @@ class DominioBot(DesktopBot):
             return True
         return False
 
-    def _dismiss_any_known_dialog(self):
+    def _dismiss_any_known_dialog(self, waiting=2000):
         """Varre a lista de dialogos transient conhecidos e dismissa o primeiro
-        que encontrar. Retorna True se dismissou algum."""
+        que encontrar. waiting (ms) eh o tempo gasto por dialogo - reduza pra
+        checagem rapida em loops de polling."""
         for name, path, label in self._KNOWN_DISMISSABLE_DIALOGS:
-            if self._dismiss_dialog_if_present(name, path, label=label):
+            if self._dismiss_dialog_if_present(name, path, label=label, waiting=waiting):
                 return True
         return False
 
