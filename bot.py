@@ -232,7 +232,10 @@ class DominioBot(DesktopBot):
     def _close_window_by_title(self, title):
         """Fecha janela com titulo EXATO via win32 WM_CLOSE. Mais robusto que
         image matching - nao depende de captura/threshold/DPI. Retorna True
-        se a janela foi encontrada visivel e o close foi enviado."""
+        se a janela foi encontrada visivel e o close foi enviado.
+
+        NOTA: so funciona pra janelas TOP-LEVEL. MDI childs (ex: 'Dashboard'
+        dentro do Contabilidade) nao sao encontrados por FindWindow direto."""
         try:
             import win32gui
             import win32con
@@ -247,6 +250,18 @@ class DominioBot(DesktopBot):
         except Exception as e:
             print(f"  WARN: win32 close '{title}' falhou: {e}")
         return False
+
+    def _alt_key(self, letter):
+        """Envia ALT+<letter> (mnemonic activator de dialog Win32). Usa pyautogui
+        direto porque botcity DesktopBot nao expoe um key_combo generico."""
+        import pyautogui
+        pyautogui.hotkey("alt", letter)
+
+    def _ctrl_f4(self):
+        """Ctrl+F4 = atalho Windows pra fechar MDI child window (ex: form
+        'Dashboard' dentro do app Contabilidade)."""
+        import pyautogui
+        pyautogui.hotkey("ctrl", "f4")
 
     def _dismiss_any_known_dialog(self, waiting=2000):
         """Tenta fechar dialogos/janelas conhecidos. Win32 (por titulo exato)
@@ -274,10 +289,14 @@ class DominioBot(DesktopBot):
         print("  Aguardando o modulo Contabilidade terminar de carregar (15s)...")
         self.wait(15000)
 
-        # Fecha popups e o Dashboard que bloqueiam a tela principal do Contabilidade
+        # Fecha popups e o Dashboard que bloqueiam a tela principal do Contabilidade.
+        # Dashboard eh MDI child (FindWindow nao acha) -> fallback via Ctrl+F4.
         self._dismiss_any_known_dialog()
         if self._close_window_by_title("Dashboard"):
-            print("  Janela 'Dashboard' fechada (estava bloqueando o menu).")
+            print("  Janela 'Dashboard' fechada via WM_CLOSE.")
+        else:
+            print("  Tentando fechar Dashboard via Ctrl+F4 (MDI child close)...")
+            self._ctrl_f4()
         self.wait(2000)
         self._dismiss_any_known_dialog()
         self.wait(1000)
@@ -298,7 +317,7 @@ class DominioBot(DesktopBot):
         # ALT+C = mnemonic do radio 'Codigo' (C sublinhado). Idempotente:
         # se ja estiver selecionado, nada muda.
         print("  ALT+C -> garantindo modo de busca por 'Codigo'...")
-        self.key_combo("alt+c")
+        self._alt_key("c")
         self.wait(600)
 
         # TAB sai do radio e cai na caixa de texto do filtro.
