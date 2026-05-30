@@ -13,9 +13,13 @@ PROFILE_DIR = str(PROJECT_DIR / "playwright-profile")
 
 class DominioBot(DesktopBot):
 
-    # Dialogos transient conhecidos que podem aparecer e bloquear elementos.
-    # ENTER (botao default OK em dialog Win32) dismissa todos. Adicione novos aqui
-    # conforme forem descobertos - qualquer passo se beneficia automaticamente.
+    # Janelas (por titulo exato) que sao transient e devem ser fechadas via
+    # win32 WM_CLOSE sempre que aparecerem. Mais robusto que image matching.
+    _KNOWN_DISMISSABLE_WINDOWS = [
+        ("Erro", "popup de erro generico (ex: Busca Convencoes)"),
+    ]
+
+    # Dialogos por imagem - fallback se win32 nao encontrar/fechar.
     _KNOWN_DISMISSABLE_DIALOGS = [
         ("err_busca_convencoes", "resources/err_busca_convencoes.png", "erro Busca Convencoes"),
     ]
@@ -225,14 +229,39 @@ class DominioBot(DesktopBot):
             return True
         return False
 
+    def _close_window_by_title(self, title):
+        """Fecha janela com titulo EXATO via win32 WM_CLOSE. Mais robusto que
+        image matching - nao depende de captura/threshold/DPI. Retorna True
+        se a janela foi encontrada visivel e o close foi enviado."""
+        try:
+            import win32gui
+            import win32con
+        except ImportError:
+            return False
+        try:
+            hwnd = win32gui.FindWindow(None, title)
+            if hwnd and win32gui.IsWindowVisible(hwnd):
+                win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+                self.wait(800)
+                return True
+        except Exception as e:
+            print(f"  WARN: win32 close '{title}' falhou: {e}")
+        return False
+
     def _dismiss_any_known_dialog(self, waiting=2000):
-        """Varre a lista de dialogos transient conhecidos e dismissa o primeiro
-        que encontrar. waiting (ms) eh o tempo gasto por dialogo - reduza pra
-        checagem rapida em loops de polling."""
+        """Tenta fechar dialogos/janelas conhecidos. Win32 (por titulo exato)
+        primeiro - mais robusto. Image matching como fallback."""
+        closed = False
+        # 1. Win32 WM_CLOSE - por titulo. Mais confiavel pra Win32 dialogs.
+        for title, label in self._KNOWN_DISMISSABLE_WINDOWS:
+            if self._close_window_by_title(title):
+                print(f"  Janela '{title}' fechada via win32 ({label}).")
+                closed = True
+        # 2. Image matching - fallback caso win32 nao encontre o titulo.
         for name, path, label in self._KNOWN_DISMISSABLE_DIALOGS:
             if self._dismiss_dialog_if_present(name, path, label=label, waiting=waiting):
-                return True
-        return False
+                closed = True
+        return closed
 
     # ------------------------------------------------------------------
     # [4/6] Selecao da empresa
@@ -241,10 +270,23 @@ class DominioBot(DesktopBot):
     def tela_selecionar_empresa(self) -> bool:
         print("\n[4/6] Selecionando a empresa...")
         # O modulo Contabilidade demora a carregar depois do login - da um tempo
-        # antes de procurar a tela de empresa. (Dialogos transient como o erro
-        # 'Busca Convencoes' sao tratados automaticamente em _find_or_debug.)
+        # antes de procurar a tela de empresa.
         print("  Aguardando o modulo Contabilidade terminar de carregar (15s)...")
         self.wait(15000)
+
+        # 1. Fecha popups de erro conhecidos (Erro / Busca Convencoes / etc).
+        self._dismiss_any_known_dialog()
+
+        # 2. Fecha a janela 'Dashboard' que abre por default e bloqueia o menu
+        # de selecao de empresa. Usa win32 WM_CLOSE (titulo exato).
+        if self._close_window_by_title("Dashboard"):
+            print("  Janela 'Dashboard' fechada (estava bloqueando o menu de empresa).")
+        self.wait(2000)
+
+        # 3. Re-tenta dismiss caso outro erro tenha aparecido apos fechar o Dashboard.
+        self._dismiss_any_known_dialog()
+        self.wait(1000)
+
         if not self._find_or_debug("menu_empresa", "resources/menu_empresa.png",
                                    matching=0.80, waiting=45000, label="menu Empresa"):
             return False
