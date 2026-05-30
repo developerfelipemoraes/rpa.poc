@@ -13,6 +13,13 @@ PROFILE_DIR = str(PROJECT_DIR / "playwright-profile")
 
 class DominioBot(DesktopBot):
 
+    # Dialogos transient conhecidos que podem aparecer e bloquear elementos.
+    # ENTER (botao default OK em dialog Win32) dismissa todos. Adicione novos aqui
+    # conforme forem descobertos - qualquer passo se beneficia automaticamente.
+    _KNOWN_DISMISSABLE_DIALOGS = [
+        ("err_busca_convencoes", "resources/err_busca_convencoes.png", "erro Busca Convencoes"),
+    ]
+
     def action(self, execution=None):
         if not self.tela_login_web():
             return
@@ -176,6 +183,10 @@ class DominioBot(DesktopBot):
             print(f"  ERRO: PNG '{path}' nao existe. Capture a tela atual ({shot}) pra gerar o template.")
             return False
 
+        # Defensivo: se algum dialogo transient conhecido tiver pop-up'ado por cima,
+        # dismissa antes de procurar (senao o elemento alvo fica escondido).
+        self._dismiss_any_known_dialog()
+
         self.add_image(name, path)
         if not self.find(name, matching=matching, waiting_time=waiting):
             ts = datetime.now().strftime("%H%M%S")
@@ -201,19 +212,27 @@ class DominioBot(DesktopBot):
             return True
         return False
 
+    def _dismiss_any_known_dialog(self):
+        """Varre a lista de dialogos transient conhecidos e dismissa o primeiro
+        que encontrar. Retorna True se dismissou algum."""
+        for name, path, label in self._KNOWN_DISMISSABLE_DIALOGS:
+            if self._dismiss_dialog_if_present(name, path, label=label):
+                return True
+        return False
+
     # ------------------------------------------------------------------
     # [4/6] Selecao da empresa
     # TODO: capturar o(s) PNG(s) na VM (1920x1080) e ajustar nomes/threshold.
     # ------------------------------------------------------------------
     def tela_selecionar_empresa(self) -> bool:
         print("\n[4/6] Selecionando a empresa...")
-        # erro transient que pode aparecer ao abrir o modulo (verificacao de
-        # ativacao do "Busca Convencoes" falha) - dismissamos com ENTER se aparecer.
-        self._dismiss_dialog_if_present("err_busca_convencoes",
-                                        "resources/err_busca_convencoes.png",
-                                        label="erro Busca Convencoes")
+        # O modulo Contabilidade demora a carregar depois do login - da um tempo
+        # antes de procurar a tela de empresa. (Dialogos transient como o erro
+        # 'Busca Convencoes' sao tratados automaticamente em _find_or_debug.)
+        print("  Aguardando o modulo Contabilidade terminar de carregar (15s)...")
+        self.wait(15000)
         if not self._find_or_debug("menu_empresa", "resources/menu_empresa.png",
-                                   matching=0.80, waiting=30000, label="menu Empresa"):
+                                   matching=0.80, waiting=45000, label="menu Empresa"):
             return False
         self.click()
         self.wait(500)
