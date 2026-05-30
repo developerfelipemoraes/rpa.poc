@@ -164,6 +164,18 @@ class DominioBot(DesktopBot):
     # screenshot de debug (padronza o tratamento "caso algo quebre").
     # ------------------------------------------------------------------
     def _find_or_debug(self, name, path, matching=0.80, waiting=30000, label=""):
+        # Se o PNG-template ainda nao existe (passo novo sem captura), salva
+        # um screenshot da tela atual pra identificar o elemento a capturar.
+        if not os.path.isfile(path):
+            ts = datetime.now().strftime("%H%M%S")
+            shot = f"debug_{name}_MISSING_{ts}.png"
+            try:
+                self.screenshot(shot)
+            except Exception as e:
+                print(f"  WARN: nao consegui salvar screenshot: {e}")
+            print(f"  ERRO: PNG '{path}' nao existe. Capture a tela atual ({shot}) pra gerar o template.")
+            return False
+
         self.add_image(name, path)
         if not self.find(name, matching=matching, waiting_time=waiting):
             ts = datetime.now().strftime("%H%M%S")
@@ -174,11 +186,32 @@ class DominioBot(DesktopBot):
         return True
 
     # ------------------------------------------------------------------
+    # Helper: detecta dialogo opcional (erro/aviso transient) e dismissa
+    # com ENTER (botao default OK em dialog Win32). Se o PNG nao existir
+    # ou o dialogo nao aparecer, segue silenciosamente.
+    # ------------------------------------------------------------------
+    def _dismiss_dialog_if_present(self, name, path, label="", matching=0.75, waiting=2000):
+        if not os.path.isfile(path):
+            return False
+        self.add_image(name, path)
+        if self.find(name, matching=matching, waiting_time=waiting):
+            print(f"  Dialog detectado ({label or name}) -> ENTER (OK default).")
+            self.enter()
+            self.wait(800)
+            return True
+        return False
+
+    # ------------------------------------------------------------------
     # [4/6] Selecao da empresa
     # TODO: capturar o(s) PNG(s) na VM (1920x1080) e ajustar nomes/threshold.
     # ------------------------------------------------------------------
     def tela_selecionar_empresa(self) -> bool:
         print("\n[4/6] Selecionando a empresa...")
+        # erro transient que pode aparecer ao abrir o modulo (verificacao de
+        # ativacao do "Busca Convencoes" falha) - dismissamos com ENTER se aparecer.
+        self._dismiss_dialog_if_present("err_busca_convencoes",
+                                        "resources/err_busca_convencoes.png",
+                                        label="erro Busca Convencoes")
         if not self._find_or_debug("menu_empresa", "resources/menu_empresa.png",
                                    matching=0.80, waiting=30000, label="menu Empresa"):
             return False
