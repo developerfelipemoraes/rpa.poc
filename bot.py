@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from botcity.core import DesktopBot
@@ -19,11 +20,17 @@ class DominioBot(DesktopBot):
             return
         if not self.tela_login_modulo():
             return
+        if not self.tela_selecionar_empresa():
+            return
+        if not self.navegar_para_importacao():
+            return
+        if not self.importar_arquivo():
+            return
 
         print("\n=== FLUXO COMPLETO COM SUCESSO ===")
 
     def tela_login_web(self) -> bool:
-        print("\n[1/3] Login web (Playwright)...")
+        print("\n[1/6] Login web (Playwright)...")
         usuario = os.getenv("DOMINIO_USUARIO")
         senha = os.getenv("DOMINIO_SENHA")
         if not usuario or not senha:
@@ -79,6 +86,18 @@ class DominioBot(DesktopBot):
                 except PlaywrightTimeout:
                     print("  Tela de senha pulada (talvez ja logado)")
 
+                # tela de aviso/manutencao pos-login (opcional - aparece eventualmente,
+                # ex.: aviso de janela de manutencao com botao Continuar)
+                try:
+                    continuar_btn = page.get_by_role("button", name="Continuar")
+                    continuar_btn.wait_for(state="visible", timeout=5000)
+                    continuar_btn.click()
+                    print("  Cliquei em 'Continuar' (tela de aviso pos-login)")
+                    page.wait_for_load_state("domcontentloaded")
+                    page.wait_for_timeout(2000)
+                except PlaywrightTimeout:
+                    print("  Sem tela de aviso pos-login")
+
                 # aguarda o protocolo TRComputerPluginWindows disparar
                 print("  Aguardando 15s pro plugin abrir...")
                 page.wait_for_timeout(15000)
@@ -95,21 +114,16 @@ class DominioBot(DesktopBot):
                 return False
 
     def tela_lista_programas(self) -> bool:
-        print("\n[2/3] Tela 'Lista de Programas' - abrindo Contabilidade...")
-        self.add_image("btn_contabilidade", "resources/btn_contabilidade.png")
-        if not self.find("btn_contabilidade", matching=0.75, waiting_time=30000):
-            print("  ERRO: icone Contabilidade nao encontrado.")
-            from datetime import datetime
-            debug_path = f"debug_lista_programas_{datetime.now().strftime('%H%M%S')}.png"
-            self.screenshot(debug_path)
-            print(f"  DEBUG: screenshot salvo em {debug_path}")
+        print("\n[2/6] Tela 'Lista de Programas' - abrindo Contabilidade...")
+        if not self._find_or_debug("btn_contabilidade", "resources/btn_contabilidade.png",
+                                   matching=0.75, waiting=30000, label="icone Contabilidade"):
             return False
         self.double_click()
         print("  OK: duplo-clique em Contabilidade.")
         return True
 
     def tela_login_modulo(self) -> bool:
-        print("\n[3/3] Login do modulo Contabilidade (Conectando...)...")
+        print("\n[3/6] Login do modulo Contabilidade (Conectando...)...")
         self.add_image("anchor_nome_usuario", "resources/btn_nome_usuario.png")
         self.add_image("btn_ok_modulo", "resources/btn_modulo_ok.png")
 
@@ -143,6 +157,81 @@ class DominioBot(DesktopBot):
             print("  Botao OK nao encontrado por imagem. Usando ENTER (botao default).")
             self.enter()
         self.wait(5000)
+        return True
+
+    # ------------------------------------------------------------------
+    # Helper: adiciona a imagem, procura, e em caso de falha salva um
+    # screenshot de debug (padronza o tratamento "caso algo quebre").
+    # ------------------------------------------------------------------
+    def _find_or_debug(self, name, path, matching=0.80, waiting=30000, label=""):
+        self.add_image(name, path)
+        if not self.find(name, matching=matching, waiting_time=waiting):
+            ts = datetime.now().strftime("%H%M%S")
+            shot = f"debug_{name}_{ts}.png"
+            self.screenshot(shot)
+            print(f"  ERRO: '{label or name}' nao encontrado. Debug: {shot}")
+            return False
+        return True
+
+    # ------------------------------------------------------------------
+    # [4/6] Selecao da empresa
+    # TODO: capturar o(s) PNG(s) na VM (1920x1080) e ajustar nomes/threshold.
+    # ------------------------------------------------------------------
+    def tela_selecionar_empresa(self) -> bool:
+        print("\n[4/6] Selecionando a empresa...")
+        if not self._find_or_debug("menu_empresa", "resources/menu_empresa.png",
+                                   matching=0.80, waiting=30000, label="menu Empresa"):
+            return False
+        self.click()
+        self.wait(500)
+        # TODO: selecionar a empresa-alvo. Opcoes:
+        #   por imagem:  self._find_or_debug("empresa_alvo", "resources/empresa_alvo.png") + self.double_click()
+        #   por codigo:  self.kb_type(os.getenv("EMPRESA_CODIGO", "")); self.enter()
+        print("  OK: empresa selecionada.")
+        return True
+
+    # ------------------------------------------------------------------
+    # [5/6] Navega pelo menu ate a tela de importacao
+    # TODO: ajustar o caminho do menu (ex: Movimentos -> Importacao -> ...).
+    # ------------------------------------------------------------------
+    def navegar_para_importacao(self) -> bool:
+        print("\n[5/6] Navegando ate a tela de importacao...")
+        passos = [
+            ("menu_movimentos", "resources/menu_movimentos.png", "menu Movimentos"),
+            ("menu_importacao", "resources/menu_importacao.png", "menu Importacao"),
+        ]
+        for name, png, label in passos:
+            if not self._find_or_debug(name, png, matching=0.80, waiting=20000, label=label):
+                return False
+            self.click()
+            self.wait(800)
+        print("  OK: tela de importacao aberta.")
+        return True
+
+    # ------------------------------------------------------------------
+    # [6/6] Importa o arquivo (botao Importar -> dialogo "Abrir" -> confirma)
+    # TODO: confirmar origem/caminho do arquivo e o passo de confirmacao.
+    # ------------------------------------------------------------------
+    def importar_arquivo(self) -> bool:
+        print("\n[6/6] Importando o arquivo...")
+        arquivo = os.getenv("ARQUIVO_IMPORTACAO", r"C:\rpa\app\dados\importar.txt")
+        if not Path(arquivo).exists():
+            print(f"  ERRO: arquivo de importacao nao encontrado: {arquivo}")
+            return False
+        if not self._find_or_debug("btn_importar", "resources/btn_importar.png",
+                                   matching=0.80, waiting=20000, label="botao Importar"):
+            return False
+        self.click()
+        self.wait(1500)
+        # dialogo Win32 "Abrir": digita o caminho e confirma (mesmo padrao do login do modulo)
+        self.kb_type(arquivo)
+        self.wait(300)
+        self.enter()
+        self.wait(2000)
+        # TODO: confirmar a importacao + validar sucesso, ex:
+        #   if self._find_or_debug("btn_confirmar_import", "resources/btn_confirmar_import.png", waiting=10000):
+        #       self.click()
+        print(f"  OK: importacao disparada para {arquivo}.")
         return True
 
 
