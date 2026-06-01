@@ -18,6 +18,7 @@ import sys
 import json
 import time
 import base64
+import msvcrt
 import traceback
 import subprocess
 from datetime import datetime, timezone
@@ -42,6 +43,28 @@ POLL_EMPTY_SLEEP   = int(os.getenv("POLL_EMPTY_SLEEP", "10"))
 VISIBILITY_TIMEOUT = int(os.getenv("VISIBILITY_TIMEOUT", "1800"))
 BOT_TIMEOUT        = int(os.getenv("BOT_TIMEOUT", "1500"))
 MAX_DEQUEUE        = int(os.getenv("MAX_DEQUEUE", "3"))
+
+LOCK_PATH = os.getenv("WORKER_LOCK_PATH", r"C:\rpa\app\worker.lock")
+
+
+def acquire_singleton_lock():
+    """Garante 1 worker.py por VM. Libera no exit/crash via OS file handle.
+
+    Win32: msvcrt.locking(LK_NBLCK) eh nao-bloqueante; se outra instancia
+    ja segura o lock, levanta OSError imediatamente.
+    """
+    os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
+    fh = open(LOCK_PATH, "a+")
+    try:
+        msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        fh.close()
+        return None
+    fh.seek(0)
+    fh.truncate()
+    fh.write(f"{os.getpid()} {now_iso()}\n")
+    fh.flush()
+    return fh
 
 
 def now_iso():
@@ -132,6 +155,7 @@ def process_job(blob_svc, job):
         empresas_result.append({"codigo": codigo, **outcome})
 
     oks = [e for e in empresas_result if e.get("ok")]
+    
     if len(oks) == len(empresas_result) and empresas_result:
         overall = "DONE"
     elif oks:
@@ -161,6 +185,14 @@ def decode_message_content(content):
 
 
 def main():
+    lock_fh = acquire_singleton_lock()
+    if lock_fh is None:
+        print(f"[worker] outra instancia ja segura {LOCK_PATH}. Saindo.",
+              file=sys.stderr, flush=True)
+        sys.exit(2)
+    print(f"[worker] singleton lock OK ({LOCK_PATH}, pid={os.getpid()})",
+          flush=True)
+
     queue, blob_svc = build_clients()
     print(f"[worker] started; account={STORAGE_ACCOUNT} queue={QUEUE_NAME} "
           f"poll_sleep={POLL_EMPTY_SLEEP}s visibility={VISIBILITY_TIMEOUT}s",
