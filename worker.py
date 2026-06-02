@@ -50,20 +50,28 @@ LOCK_PATH = os.getenv("WORKER_LOCK_PATH", r"C:\rpa\app\worker.lock")
 def acquire_singleton_lock():
     """Garante 1 worker.py por VM. Libera no exit/crash via OS file handle.
 
-    Win32: msvcrt.locking(LK_NBLCK) eh nao-bloqueante; se outra instancia
-    ja segura o lock, levanta OSError imediatamente.
+    Win32 gotcha: msvcrt.locking() trava bytes a partir da POSICAO ATUAL.
+    Modo "a+" posiciona em EOF e cada processo lockaria um byte diferente
+    (lock nao bate). Por isso abrimos em "r+b" (posicao 0) e fazemos
+    seek(0) explicito antes do locking.
     """
     os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
-    fh = open(LOCK_PATH, "a+")
+    if not os.path.exists(LOCK_PATH):
+        open(LOCK_PATH, "a").close()
+    fh = open(LOCK_PATH, "r+b")
     try:
+        fh.seek(0)
         msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
     except OSError:
         fh.close()
         return None
-    fh.seek(0)
-    fh.truncate()
-    fh.write(f"{os.getpid()} {now_iso()}\n")
-    fh.flush()
+    try:
+        fh.seek(1)
+        fh.truncate()
+        fh.write(f"{os.getpid()} {now_iso()}\n".encode("utf-8"))
+        fh.flush()
+    except OSError:
+        pass
     return fh
 
 
