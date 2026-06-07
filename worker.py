@@ -116,6 +116,31 @@ def download_file(blob_svc, blob_path, local_path):
         f.write(bc.download_blob().readall())
 
 
+RESULT_SENTINEL = "RPA_RESULT_JSON:"
+
+
+def parse_bot_result(stdout):
+    """Extrai a linha-sentinela 'RPA_RESULT_JSON:{...}' emitida pelo bot.py e
+    devolve os campos enriquecidos (imported/errors/failed_step/message).
+
+    Procura de baixo pra cima (a sentinela e a ultima linha do bot) e retorna {}
+    se ausente/invalida - nesse caso o result fica so com returncode/logs."""
+    for line in reversed((stdout or "").splitlines()):
+        line = line.strip()
+        if line.startswith(RESULT_SENTINEL):
+            try:
+                data = json.loads(line[len(RESULT_SENTINEL):])
+            except (ValueError, TypeError):
+                return {}
+            return {
+                "imported": data.get("imported"),
+                "errors": data.get("errors"),
+                "failed_step": data.get("failed_step"),
+                "message": data.get("message"),
+            }
+    return {}
+
+
 def run_bot(empresa_codigo, arquivo_path):
     env = {**os.environ,
            "EMPRESA_CODIGO": str(empresa_codigo),
@@ -126,20 +151,26 @@ def run_bot(empresa_codigo, arquivo_path):
             env=env, capture_output=True, text=True,
             timeout=BOT_TIMEOUT,
         )
-        return {
+        stdout = r.stdout or ""
+        out = {
             "ok": r.returncode == 0,
             "returncode": r.returncode,
-            "stdout_tail": (r.stdout or "")[-2000:],
+            "stdout_tail": stdout[-2000:],
             "stderr_tail": (r.stderr or "")[-1000:],
         }
+        out.update(parse_bot_result(stdout))
+        return out
     except subprocess.TimeoutExpired as e:
-        return {
+        stdout = e.stdout or ""
+        out = {
             "ok": False,
             "returncode": -1,
             "error": "timeout",
-            "stdout_tail": (e.stdout or "")[-2000:] if e.stdout else "",
+            "stdout_tail": stdout[-2000:] if stdout else "",
             "stderr_tail": (e.stderr or "")[-1000:] if e.stderr else "",
         }
+        out.update(parse_bot_result(stdout))
+        return out
 
 
 def process_job(blob_svc, job):
@@ -163,7 +194,7 @@ def process_job(blob_svc, job):
         empresas_result.append({"codigo": codigo, **outcome})
 
     oks = [e for e in empresas_result if e.get("ok")]
-    
+
     if len(oks) == len(empresas_result) and empresas_result:
         overall = "DONE"
     elif oks:
@@ -171,12 +202,20 @@ def process_job(blob_svc, job):
     else:
         overall = "FAILED"
 
+    # Totais agregados (somando so o que o bot conseguiu ler; None = desconhecido).
+    imported_total = sum(e["imported"] for e in empresas_result
+                         if isinstance(e.get("imported"), int))
+    errors_total = sum(e["errors"] for e in empresas_result
+                       if isinstance(e.get("errors"), int))
+
     return {
         "job_id": job_id,
         "status": overall,
         "started_at": started,
         "finished_at": now_iso(),
         "scheduled_at": job.get("scheduled_at"),
+        "imported_total": imported_total,
+        "errors_total": errors_total,
         "empresas": empresas_result,
     }
 

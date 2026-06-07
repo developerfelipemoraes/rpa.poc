@@ -1,0 +1,15 @@
+{
+  "job_id": "3f9c2a10-7b1e-4d4a-9c0a-2b6f1e8d5a44",
+  "scheduled_at": "2026-06-07T14:00:00-03:00",
+  "empresas": [
+    {
+      "codigo": "5805",
+      "arquivo_blob": "rpa-files/3f9c2a10-7b1e-4d4a-9c0a-2b6f1e8d5a44/notas_5805.txt"
+    },
+    {
+      "codigo": "5806",
+      "arquivo_blob": "rpa-files/3f9c2a10-7b1e-4d4a-9c0a-2b6f1e8d5a44/notas_5806.txt"
+    }
+  ],
+  "callback_blob": "rpa-results/3f9c2a10-7b1e-4d4a-9c0a-2b6f1e8d5a44.json"
+}

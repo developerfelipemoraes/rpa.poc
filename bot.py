@@ -1,4 +1,6 @@
 import os
+import sys
+import json
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -25,20 +27,74 @@ class DominioBot(DesktopBot):
     ]
 
     def action(self, execution=None):
-        if not self.tela_login_web():
-            return
-        if not self.tela_lista_programas():
-            return
-        if not self.tela_login_modulo():
-            return
-        if not self.tela_selecionar_empresa():
-            return
-        if not self.navegar_para_importacao():
-            return
-        if not self.importar_arquivo():
-            return
+        """Executa o fluxo e RETORNA um dict de result (consumido pelo worker.py
+        via a linha-sentinela RPA_RESULT_JSON). NUNCA mais retorna None silencioso:
+        cada etapa que falha vira ok=False + failed_step, e o __main__ traduz isso
+        em sys.exit(1) para o worker enxergar a falha pelo returncode."""
+        steps = [
+            ("login_web", self.tela_login_web),
+            ("lista_programas", self.tela_lista_programas),
+            ("login_modulo", self.tela_login_modulo),
+            ("selecionar_empresa", self.tela_selecionar_empresa),
+            ("navegar_importacao", self.navegar_para_importacao),
+            ("importar_arquivo", self.importar_arquivo),
+        ]
 
+        # Enquanto a importacao nao esta pronta (faltam os PNGs de menu/importar),
+        # o fluxo pode parar logo APOS a selecao da empresa (F8). Ligado por env
+        # RPA_ATE_EMPRESA=1 -> conclui DONE em selecionar_empresa, sem navegar/importar.
+        ate_empresa = os.getenv("RPA_ATE_EMPRESA", "").strip().lower() in ("1", "true", "yes", "sim")
+        if ate_empresa:
+            cut = [n for n, _ in steps].index("selecionar_empresa") + 1
+            steps = steps[:cut]
+
+        for name, fn in steps:
+            if not fn():
+                return {
+                    "ok": False,
+                    "failed_step": name,
+                    "imported": None,
+                    "errors": None,
+                    "message": f"falha na etapa '{name}'",
+                }
+
+        if ate_empresa:
+            print("\n=== ATE F8/EMPRESA OK (importacao desabilitada via RPA_ATE_EMPRESA) ===")
+            return {
+                "ok": True,
+                "failed_step": None,
+                "imported": None,
+                "errors": None,
+                "message": "parou apos selecao de empresa (F8); importacao desabilitada (RPA_ATE_EMPRESA)",
+            }
+
+        imported, errors = self._ler_resultado_importacao()
         print("\n=== FLUXO COMPLETO COM SUCESSO ===")
+        return {
+            "ok": True,
+            "failed_step": None,
+            "imported": imported,
+            "errors": errors,
+            "message": "fluxo completo",
+        }
+
+    def _ler_resultado_importacao(self):
+        """Lê os contadores reais da importação (lançamentos importados / erros) da
+        tela de confirmação do Domínio Contabilidade.
+
+        ATENÇÃO: o parsing da tela de resultado depende de capturar o template
+        dessa tela na VM (1920x1080). Enquanto o template não existe, gravamos um
+        screenshot 'import_result_<ts>.png' para captura e retornamos (None, None)
+        — o contrato do result já carrega os campos; os números entram quando o
+        leitor da tela for implementado a partir do print capturado."""
+        ts = datetime.now().strftime("%H%M%S")
+        try:
+            self.screenshot(f"import_result_{ts}.png")
+            print(f"  Tela de resultado capturada: import_result_{ts}.png "
+                  f"(envie para implementar a leitura de imported/errors).")
+        except Exception as e:
+            print(f"  WARN: nao consegui capturar a tela de resultado: {e}")
+        return None, None
 
     def tela_login_web(self) -> bool:
         print("\n[1/6] Login web (Playwright)...")
@@ -383,4 +439,21 @@ class DominioBot(DesktopBot):
 
 
 if __name__ == "__main__":
-    DominioBot.main()
+    bot = DominioBot()
+    try:
+        result = bot.action()
+    except Exception as e:
+        result = {
+            "ok": False,
+            "failed_step": "exception",
+            "imported": None,
+            "errors": None,
+            "message": f"{type(e).__name__}: {e}",
+        }
+
+    # Linha-sentinela: o worker.py faz parse de RPA_RESULT_JSON no stdout para
+    # enriquecer o result do job (imported/errors/failed_step/message).
+    print("RPA_RESULT_JSON:" + json.dumps(result, ensure_ascii=False), flush=True)
+
+    # Exit code = contrato com o worker (run_bot considera ok = returncode == 0).
+    sys.exit(0 if result.get("ok") else 1)

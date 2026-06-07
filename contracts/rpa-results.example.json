@@ -1,0 +1,33 @@
+{
+  "job_id": "3f9c2a10-7b1e-4d4a-9c0a-2b6f1e8d5a44",
+  "status": "DONE",
+  "started_at": "2026-06-07T17:00:05.123456+00:00",
+  "finished_at": "2026-06-07T17:08:42.987654+00:00",
+  "scheduled_at": "2026-06-07T14:00:00-03:00",
+  "imported_total": 0,
+  "errors_total": 0,
+  "empresas": [
+    {
+      "codigo": "5805",
+      "ok": true,
+      "returncode": 0,
+      "imported": null,
+      "errors": null,
+      "failed_step": null,
+      "message": "fluxo completo",
+      "stdout_tail": "... ultimas 2000 chars do stdout do bot.py ...",
+      "stderr_tail": ""
+    },
+    {
+      "codigo": "5806",
+      "ok": false,
+      "returncode": 1,
+      "imported": null,
+      "errors": null,
+      "failed_step": "selecionar_empresa",
+      "message": "falha na etapa 'selecionar_empresa'",
+      "stdout_tail": "... ultimas 2000 chars do stdout do bot.py ...",
+      "stderr_tail": "... ultimas 1000 chars do stderr ..."
+    }
+  ]
+}
