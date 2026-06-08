@@ -1,7 +1,9 @@
 """Monta um MP4 LEGENDADO a partir dos frames capturados pelo bot (RPA_RECORD_DIR).
 
 Cada frame NN_passo.png vira ~N segundos de video, com uma faixa de legenda
-explicando o passo. Usa cv2 (VideoWriter) + PIL (texto). Sem ffmpeg.
+explicando o passo (queimada na imagem via PIL). Alem disso gera um .srt e, se
+houver ffmpeg, EMBUTE o .srt como faixa de legenda (soft subs) dentro do MP4 —
+um unico arquivo com a legenda unida. Sem ffmpeg, mantem a legenda queimada + .srt.
 
 Uso:
   python tools/make_video.py --frames-dir C:\rpa\rec --out C:\rpa\video-execucao\rpa-execucao.mp4
@@ -9,7 +11,9 @@ Uso:
 
 import os
 import glob
+import shutil
 import argparse
+import subprocess
 
 import cv2
 import numpy as np
@@ -97,8 +101,10 @@ def main():
         raise SystemExit(f"Nenhum frame em {args.frames_dir}")
 
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    # Escreve primeiro num temp; depois (se houver ffmpeg) muxamos a legenda no .out.
+    video_tmp = args.out + ".tmp.mp4"
     fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    vw = cv2.VideoWriter(args.out, fourcc, FPS, (W, H))
+    vw = cv2.VideoWriter(video_tmp, fourcc, FPS, (W, H))
     reps = max(1, int(FPS * args.seconds_per_frame))
 
     srt_entries = []
@@ -120,6 +126,24 @@ def main():
     with open(srt_path, "w", encoding="utf-8") as s:
         for n, start, end, legend in srt_entries:
             s.write(f"{n}\n{_ts(start)} --> {_ts(end)}\n{legend}\n\n")
+
+    # UNE a legenda ao video: embute o .srt como faixa de legenda (soft subs) no MP4.
+    # Mantem a faixa queimada na imagem; ffmpeg so adiciona a trilha selecionavel.
+    ff = shutil.which("ffmpeg")
+    if ff:
+        cmd = [ff, "-y", "-i", video_tmp, "-i", srt_path,
+               "-c", "copy", "-c:s", "mov_text",
+               "-metadata:s:s:0", "language=por", args.out]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode == 0 and os.path.isfile(args.out):
+            os.remove(video_tmp)
+            print(f"OK: legenda EMBUTIDA no video via ffmpeg -> {args.out}")
+        else:
+            os.replace(video_tmp, args.out)
+            print(f"WARN: ffmpeg falhou ({(r.stderr or '')[-200:]}); video com legenda queimada + .srt ao lado")
+    else:
+        os.replace(video_tmp, args.out)
+        print("INFO: ffmpeg ausente; legenda queimada na imagem + .srt ao lado")
 
     print(f"OK: video salvo em {args.out} ({len(frames)} passos, {args.seconds_per_frame}s cada)")
     print(f"OK: legenda salva em {srt_path}")
