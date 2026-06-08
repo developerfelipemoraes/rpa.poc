@@ -48,8 +48,10 @@ class DominioBot(DesktopBot):
             cut = [n for n, _ in steps].index("selecionar_empresa") + 1
             steps = steps[:cut]
 
-        for name, fn in steps:
+        self._record_frame(0, "inicio")
+        for i, (name, fn) in enumerate(steps, start=1):
             if not fn():
+                self._record_frame(i, f"FALHA_{name}")
                 return {
                     "ok": False,
                     "failed_step": name,
@@ -57,6 +59,7 @@ class DominioBot(DesktopBot):
                     "errors": None,
                     "message": f"falha na etapa '{name}'",
                 }
+            self._record_frame(i, name)
 
         if ate_empresa:
             print("\n=== ATE F8/EMPRESA OK (importacao desabilitada via RPA_ATE_EMPRESA) ===")
@@ -77,6 +80,20 @@ class DominioBot(DesktopBot):
             "errors": errors,
             "message": "fluxo completo",
         }
+
+    def _record_frame(self, idx, name):
+        """Se RPA_RECORD_DIR estiver setado, salva um screenshot do desktop por
+        passo (NN_nome.png) para depois montar o video legendado da execucao."""
+        rec = os.getenv("RPA_RECORD_DIR", "").strip()
+        if not rec:
+            return
+        try:
+            os.makedirs(rec, exist_ok=True)
+            path = os.path.join(rec, f"{idx:02d}_{name}.png")
+            self.screenshot(path)
+            print(f"  [rec] frame salvo: {path}")
+        except Exception as e:
+            print(f"  [rec] WARN frame '{name}' falhou: {e}")
 
     def _ler_resultado_importacao(self):
         """Lê os contadores reais da importação (lançamentos importados / erros) da
