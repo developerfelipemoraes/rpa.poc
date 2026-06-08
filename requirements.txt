@@ -3,6 +3,8 @@ opencv-python
 pillow
 python-dotenv
 playwright
+pyautogui
+pywin32
 azure-identity
 azure-storage-queue
 azure-storage-blob
