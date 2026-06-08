@@ -23,10 +23,16 @@ import traceback
 import subprocess
 from datetime import datetime, timezone
 
+from dotenv import load_dotenv
+
 from azure.identity import ManagedIdentityCredential
 from azure.storage.queue import QueueClient
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob import BlobServiceClient, ContentSettings
 from azure.core.exceptions import ResourceNotFoundError
+
+# Carrega .env ANTES de ler as constantes abaixo, para que flags como RPA_RECORD
+# possam ser configuradas no .env (do contrario o worker so leria do env do processo).
+load_dotenv()
 
 STORAGE_ACCOUNT = os.getenv("STORAGE_ACCOUNT", "strpadomdevye0m9")
 QUEUE_NAME      = os.getenv("QUEUE_NAME", "rpa-jobs")
@@ -45,6 +51,16 @@ BOT_TIMEOUT        = int(os.getenv("BOT_TIMEOUT", "1500"))
 MAX_DEQUEUE        = int(os.getenv("MAX_DEQUEUE", "3"))
 
 LOCK_PATH = os.getenv("WORKER_LOCK_PATH", r"C:\rpa\app\worker.lock")
+
+# Gravacao de video da execucao (por empresa). Quando RPA_RECORD liga, o worker:
+#   - manda o bot gravar frames (desde o login) numa pasta por execucao/empresa;
+#   - compoe um MP4 legendado (+ .srt) via tools/make_video.py;
+#   - sobe SO no blob como video/<codigo>_<job_id>.mp4 (sem download local).
+RECORD          = os.getenv("RPA_RECORD", "").strip().lower() in ("1", "true", "yes", "sim")
+REC_BASE        = os.getenv("RPA_RECORD_BASE", r"C:\rpa\rec")
+VIDEO_CONTAINER = os.getenv("VIDEO_CONTAINER", RESULTS_CONTAINER)
+VIDEO_PREFIX    = os.getenv("VIDEO_PREFIX", "video")
+MAKE_VIDEO_PY   = os.path.join(os.path.dirname(BOT_PATH), "tools", "make_video.py")
 
 
 def acquire_singleton_lock():
@@ -141,10 +157,13 @@ def parse_bot_result(stdout):
     return {}
 
 
-def run_bot(empresa_codigo, arquivo_path):
+def run_bot(empresa_codigo, arquivo_path, record_dir=None):
     env = {**os.environ,
            "EMPRESA_CODIGO": str(empresa_codigo),
            "ARQUIVO_IMPORTACAO": arquivo_path}
+    if record_dir:
+        # Sobrescreve qualquer RPA_RECORD_DIR do .env: o worker e dono do destino.
+        env["RPA_RECORD_DIR"] = record_dir
     try:
         r = subprocess.run(
             [PY_EXE, BOT_PATH],
@@ -173,6 +192,60 @@ def run_bot(empresa_codigo, arquivo_path):
         return out
 
 
+def _prep_record_dir(job_id, codigo):
+    """Pasta de frames por execucao/empresa, limpa antes de cada run."""
+    d = os.path.join(REC_BASE, f"{job_id}_{codigo}")
+    if os.path.isdir(d):
+        for f in os.listdir(d):
+            try:
+                os.remove(os.path.join(d, f))
+            except OSError:
+                pass
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def compose_and_upload_video(blob_svc, job_id, codigo, record_dir):
+    """Compoe o MP4 legendado (+ .srt) dos frames e sobe SO no blob como
+    video/<codigo>_<job_id>.mp4. Retorna o caminho do blob ou None.
+
+    Best-effort: erro de gravacao NUNCA derruba o processamento do job."""
+    try:
+        frames = [f for f in os.listdir(record_dir) if f.lower().endswith(".png")]
+        if not frames:
+            print(f"  [rec] sem frames para {codigo}; pulando video.")
+            return None
+        out_mp4 = os.path.join(record_dir, f"{codigo}_{job_id}.mp4")
+        title = f"RPA Dominio - empresa {codigo} - exec {job_id}"
+        r = subprocess.run(
+            [PY_EXE, MAKE_VIDEO_PY, "--frames-dir", record_dir,
+             "--out", out_mp4, "--title", title],
+            capture_output=True, text=True, timeout=300,
+        )
+        if r.returncode != 0 or not os.path.isfile(out_mp4):
+            print(f"  [rec] make_video falhou: {(r.stderr or r.stdout)[-500:]}")
+            return None
+
+        blob_name = f"{VIDEO_PREFIX}/{codigo}_{job_id}.mp4"
+        with open(out_mp4, "rb") as fh:
+            blob_svc.get_blob_client(VIDEO_CONTAINER, blob_name).upload_blob(
+                fh, overwrite=True,
+                content_settings=ContentSettings(content_type="video/mp4"))
+        # legenda .srt junto (mesmo nome)
+        srt = os.path.splitext(out_mp4)[0] + ".srt"
+        if os.path.isfile(srt):
+            with open(srt, "rb") as fh:
+                blob_svc.get_blob_client(
+                    VIDEO_CONTAINER, f"{VIDEO_PREFIX}/{codigo}_{job_id}.srt").upload_blob(
+                    fh, overwrite=True,
+                    content_settings=ContentSettings(content_type="text/plain; charset=utf-8"))
+        print(f"  [rec] video no blob: {VIDEO_CONTAINER}/{blob_name}")
+        return f"{VIDEO_CONTAINER}/{blob_name}"
+    except Exception as e:
+        print(f"  [rec] WARN compose/upload falhou: {e}")
+        return None
+
+
 def process_job(blob_svc, job):
     job_id = job["job_id"]
     started = now_iso()
@@ -190,7 +263,12 @@ def process_job(blob_svc, job):
                                     "error": f"download_failed: {e}"})
             continue
 
-        outcome = run_bot(codigo, local)
+        record_dir = _prep_record_dir(job_id, codigo) if RECORD else None
+        outcome = run_bot(codigo, local, record_dir=record_dir)
+        if RECORD and record_dir:
+            video_blob = compose_and_upload_video(blob_svc, job_id, codigo, record_dir)
+            if video_blob:
+                outcome["video_blob"] = video_blob
         empresas_result.append({"codigo": codigo, **outcome})
 
     oks = [e for e in empresas_result if e.get("ok")]

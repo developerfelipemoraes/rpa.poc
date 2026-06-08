@@ -20,15 +20,29 @@ BANNER_H = 96
 FPS = 30
 
 # Legendas amigaveis por passo (casa com os nomes NN_<passo>.png do bot).
+# Gravacao comeca DESDE O LOGIN no Dominio.
 LEGENDS = {
+    "login_dominio": "Login no Dominio Web (dominioweb.com.br)",
+    "login_email": "Login: informando o e-mail",
+    "login_senha": "Login: informando a senha",
+    "plugin_abrindo": "Plugin TRComputerPlugin abrindo o app desktop",
+    "login_web": "Login concluido - app Dominio aberto",
+    "lista_programas": "Lista de Programas: abrindo Contabilidade",
+    "login_modulo": "Login do modulo Contabilidade",
+    "selecionar_empresa": "Selecao da empresa (F8 + codigo)",
+    "navegar_importacao": "Navegando para a importacao",
+    "importar_arquivo": "Importando o arquivo",
     "inicio": "Inicio - area de trabalho da VM",
-    "login_web": "1/4 - Login no Dominio Web (Playwright)",
-    "lista_programas": "2/4 - Lista de Programas: abrindo Contabilidade",
-    "login_modulo": "3/4 - Login do modulo Contabilidade",
-    "selecionar_empresa": "4/4 - Selecao da empresa (F8 + codigo)",
-    "navegar_importacao": "5/6 - Navegando para a importacao",
-    "importar_arquivo": "6/6 - Importando o arquivo",
 }
+
+
+def _ts(seconds):
+    """Timestamp SRT: HH:MM:SS,mmm"""
+    ms = int(round(seconds * 1000))
+    h, ms = divmod(ms, 3600000)
+    m, ms = divmod(ms, 60000)
+    s, ms = divmod(ms, 1000)
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 def _font(size):
@@ -87,15 +101,28 @@ def main():
     vw = cv2.VideoWriter(args.out, fourcc, FPS, (W, H))
     reps = max(1, int(FPS * args.seconds_per_frame))
 
-    for f in frames:
+    srt_entries = []
+    for idx, f in enumerate(frames):
         name = os.path.splitext(os.path.basename(f))[0]
-        frame = _compose(f, _legend_for(name), args.title)
+        legend = _legend_for(name)
+        frame = _compose(f, legend, args.title)
         for _ in range(reps):
             vw.write(frame)
-        print(f"  + {os.path.basename(f)} -> {_legend_for(name)}")
+        start = idx * args.seconds_per_frame
+        end = (idx + 1) * args.seconds_per_frame
+        srt_entries.append((idx + 1, start, end, legend))
+        print(f"  + {os.path.basename(f)} -> {legend}")
 
     vw.release()
+
+    # Legenda .srt (mesmo nome do mp4) com o passo da execucao em cada intervalo.
+    srt_path = os.path.splitext(args.out)[0] + ".srt"
+    with open(srt_path, "w", encoding="utf-8") as s:
+        for n, start, end, legend in srt_entries:
+            s.write(f"{n}\n{_ts(start)} --> {_ts(end)}\n{legend}\n\n")
+
     print(f"OK: video salvo em {args.out} ({len(frames)} passos, {args.seconds_per_frame}s cada)")
+    print(f"OK: legenda salva em {srt_path}")
 
 
 if __name__ == "__main__":

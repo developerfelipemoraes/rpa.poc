@@ -48,10 +48,11 @@ class DominioBot(DesktopBot):
             cut = [n for n, _ in steps].index("selecionar_empresa") + 1
             steps = steps[:cut]
 
-        self._record_frame(0, "inicio")
-        for i, (name, fn) in enumerate(steps, start=1):
+        # Gravacao comeca DESDE O LOGIN no Dominio (frames intra-login sao capturados
+        # dentro de tela_login_web). Aqui registramos o fim de cada passo seguinte.
+        for name, fn in steps:
             if not fn():
-                self._record_frame(i, f"FALHA_{name}")
+                self._record_frame(f"FALHA_{name}")
                 return {
                     "ok": False,
                     "failed_step": name,
@@ -59,7 +60,7 @@ class DominioBot(DesktopBot):
                     "errors": None,
                     "message": f"falha na etapa '{name}'",
                 }
-            self._record_frame(i, name)
+            self._record_frame(name)
 
         if ate_empresa:
             print("\n=== ATE F8/EMPRESA OK (importacao desabilitada via RPA_ATE_EMPRESA) ===")
@@ -81,16 +82,20 @@ class DominioBot(DesktopBot):
             "message": "fluxo completo",
         }
 
-    def _record_frame(self, idx, name):
-        """Se RPA_RECORD_DIR estiver setado, salva um screenshot do desktop por
-        passo (NN_nome.png) para depois montar o video legendado da execucao."""
+    def _record_frame(self, name):
+        """Se RPA_RECORD_DIR estiver setado, salva um screenshot do desktop com
+        indice GLOBAL incremental (NN_nome.png), preservando a ordem mesmo com
+        frames capturados dentro do login. Base do video legendado da execucao."""
         rec = os.getenv("RPA_RECORD_DIR", "").strip()
         if not rec:
             return
+        if not hasattr(self, "_frame_i"):
+            self._frame_i = 0
         try:
             os.makedirs(rec, exist_ok=True)
-            path = os.path.join(rec, f"{idx:02d}_{name}.png")
+            path = os.path.join(rec, f"{self._frame_i:02d}_{name}.png")
             self.screenshot(path)
+            self._frame_i += 1
             print(f"  [rec] frame salvo: {path}")
         except Exception as e:
             print(f"  [rec] WARN frame '{name}' falhou: {e}")
@@ -134,6 +139,8 @@ class DominioBot(DesktopBot):
                 print("  Navegando para dominioweb.com.br...")
                 page.goto("https://www.dominioweb.com.br/", wait_until="domcontentloaded")
                 page.wait_for_timeout(2000)
+                # PRIMEIRO frame da gravacao = tela de login do Dominio.
+                self._record_frame("login_dominio")
 
                 # tela inicial "Vamos começar"
                 try:
@@ -152,6 +159,7 @@ class DominioBot(DesktopBot):
                     email_input.wait_for(state="visible", timeout=10000)
                     email_input.fill(usuario)
                     print(f"  Email preenchido: {usuario}")
+                    self._record_frame("login_email")
                     email_input.press("Enter")
                     print("  Submetido [email]")
                     page.wait_for_load_state("domcontentloaded")
@@ -165,6 +173,7 @@ class DominioBot(DesktopBot):
                     senha_input.wait_for(state="visible", timeout=10000)
                     senha_input.fill(senha)
                     print("  Senha preenchida")
+                    self._record_frame("login_senha")
                     senha_input.press("Enter")
                     print("  Submetido [senha]")
                 except PlaywrightTimeout:
@@ -185,6 +194,7 @@ class DominioBot(DesktopBot):
                 # aguarda o protocolo TRComputerPluginWindows disparar
                 print("  Aguardando 15s pro plugin abrir...")
                 page.wait_for_timeout(15000)
+                self._record_frame("plugin_abrindo")
 
                 ctx.close()
                 print("  OK: login web concluido.")

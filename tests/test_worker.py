@@ -226,7 +226,7 @@ class TestProcessJob:
     def test_single_empresa_all_ok_is_done(self, monkeypatch, tmp_path):
         monkeypatch.setattr(worker, "INBOX_LOCAL", str(tmp_path))
         monkeypatch.setattr(worker, "run_bot",
-                            lambda c, p: {"ok": True, "returncode": 0})
+                            lambda c, p, **kw: {"ok": True, "returncode": 0})
         job = {"job_id": "j1",
                "empresas": [{"codigo": "5805",
                               "arquivo_blob": "rpa-files/j1/n.txt"}]}
@@ -240,7 +240,7 @@ class TestProcessJob:
     def test_all_empresas_fail_is_failed(self, monkeypatch, tmp_path):
         monkeypatch.setattr(worker, "INBOX_LOCAL", str(tmp_path))
         monkeypatch.setattr(worker, "run_bot",
-                            lambda c, p: {"ok": False, "returncode": 1})
+                            lambda c, p, **kw: {"ok": False, "returncode": 1})
         job = {"job_id": "j1",
                "empresas": [
                    {"codigo": "5805", "arquivo_blob": "rpa-files/j1/a.txt"},
@@ -255,7 +255,7 @@ class TestProcessJob:
             {"ok": True, "returncode": 0},
             {"ok": False, "returncode": 1},
         ])
-        monkeypatch.setattr(worker, "run_bot", lambda c, p: next(calls))
+        monkeypatch.setattr(worker, "run_bot", lambda c, p, **kw: next(calls))
         job = {"job_id": "j1",
                "empresas": [
                    {"codigo": "5805", "arquivo_blob": "rpa-files/j1/a.txt"},
@@ -268,7 +268,7 @@ class TestProcessJob:
         monkeypatch.setattr(worker, "INBOX_LOCAL", str(tmp_path))
         called = []
         monkeypatch.setattr(worker, "run_bot",
-                            lambda c, p: called.append((c, p)) or {"ok": True})
+                            lambda c, p, **kw: called.append((c, p)) or {"ok": True})
         svc = MagicMock()
         svc.get_blob_client.return_value.download_blob.side_effect = \
             RuntimeError("net fail")
@@ -289,7 +289,7 @@ class TestProcessJob:
     def test_scheduled_at_is_propagated(self, monkeypatch, tmp_path):
         monkeypatch.setattr(worker, "INBOX_LOCAL", str(tmp_path))
         monkeypatch.setattr(worker, "run_bot",
-                            lambda c, p: {"ok": True, "returncode": 0})
+                            lambda c, p, **kw: {"ok": True, "returncode": 0})
         job = {"job_id": "j1",
                "scheduled_at": "2026-06-01T14:00:00-03:00",
                "empresas": [{"codigo": "5805",
@@ -301,7 +301,7 @@ class TestProcessJob:
         monkeypatch.setattr(worker, "INBOX_LOCAL", str(tmp_path))
         captured = {}
 
-        def capture(codigo, path):
+        def capture(codigo, path, **kw):
             captured["codigo"] = codigo
             captured["path"] = path
             return {"ok": True, "returncode": 0}
