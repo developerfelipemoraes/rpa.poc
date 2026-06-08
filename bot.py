@@ -540,8 +540,11 @@ class DominioBot(DesktopBot):
         print("\n[4/6] Selecionando a empresa...")
         # O modulo Contabilidade demora a carregar depois do login - da um tempo
         # antes de procurar a tela de empresa.
-        print("  Aguardando o modulo Contabilidade terminar de carregar (15s)...")
-        self.wait(15000)
+        # O modulo Contabilidade demora bastante para carregar apos o login.
+        # Esperar 40s (configuravel) ANTES de fechar mensagens do Dashboard / F8.
+        load_wait = int(os.getenv("CONTAB_LOAD_WAIT_MS", "40000"))
+        print(f"  Aguardando o modulo Contabilidade terminar de carregar ({load_wait // 1000}s)...")
+        self.wait(load_wait)
 
         # Ao abrir, a Contabilidade mostra o Dashboard + um modal "Atenção"
         # ('É necessário configurar a empresa para emissão dos Dashboards').
