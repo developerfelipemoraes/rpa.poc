@@ -1,0 +1,102 @@
+"""Monta um MP4 LEGENDADO a partir dos frames capturados pelo bot (RPA_RECORD_DIR).
+
+Cada frame NN_passo.png vira ~N segundos de video, com uma faixa de legenda
+explicando o passo. Usa cv2 (VideoWriter) + PIL (texto). Sem ffmpeg.
+
+Uso:
+  python tools/make_video.py --frames-dir C:\rpa\rec --out C:\rpa\video-execucao\rpa-execucao.mp4
+"""
+
+import os
+import glob
+import argparse
+
+import cv2
+import numpy as np
+from PIL import Image, ImageDraw, ImageFont
+
+W, H = 1280, 720
+BANNER_H = 96
+FPS = 30
+
+# Legendas amigaveis por passo (casa com os nomes NN_<passo>.png do bot).
+LEGENDS = {
+    "inicio": "Inicio - area de trabalho da VM",
+    "login_web": "1/4 - Login no Dominio Web (Playwright)",
+    "lista_programas": "2/4 - Lista de Programas: abrindo Contabilidade",
+    "login_modulo": "3/4 - Login do modulo Contabilidade",
+    "selecionar_empresa": "4/4 - Selecao da empresa (F8 + codigo)",
+    "navegar_importacao": "5/6 - Navegando para a importacao",
+    "importar_arquivo": "6/6 - Importando o arquivo",
+}
+
+
+def _font(size):
+    for p in (r"C:\Windows\Fonts\segoeui.ttf", r"C:\Windows\Fonts\arial.ttf"):
+        if os.path.exists(p):
+            return ImageFont.truetype(p, size)
+    return ImageFont.load_default()
+
+
+def _legend_for(name):
+    # name = "01_login_web" (sem extensao)
+    parts = name.split("_", 1)
+    key = parts[1] if len(parts) > 1 else name
+    if key.startswith("FALHA_"):
+        return "FALHA: " + LEGENDS.get(key[len("FALHA_"):], key[len("FALHA_"):])
+    return LEGENDS.get(key, key.replace("_", " "))
+
+
+def _compose(img_path, legend, title):
+    """Letterbox do screenshot em 1280x720 + faixa de legenda embaixo + titulo."""
+    canvas = Image.new("RGB", (W, H), (15, 17, 22))
+    try:
+        shot = Image.open(img_path).convert("RGB")
+        area_h = H - BANNER_H
+        scale = min(W / shot.width, area_h / shot.height)
+        nw, nh = int(shot.width * scale), int(shot.height * scale)
+        shot = shot.resize((nw, nh), Image.LANCZOS)
+        canvas.paste(shot, ((W - nw) // 2, (area_h - nh) // 2))
+    except Exception as e:
+        ImageDraw.Draw(canvas).text((40, 40), f"(frame ilegivel: {e})", font=_font(28), fill=(255, 120, 120))
+
+    d = ImageDraw.Draw(canvas)
+    # faixa
+    d.rectangle([0, H - BANNER_H, W, H], fill=(20, 110, 200))
+    d.text((24, H - BANNER_H + 22), legend, font=_font(34), fill=(255, 255, 255))
+    # titulo (canto superior)
+    d.rectangle([0, 0, W, 40], fill=(0, 0, 0))
+    d.text((24, 6), title, font=_font(24), fill=(180, 220, 255))
+    return cv2.cvtColor(np.array(canvas), cv2.COLOR_RGB2BGR)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--frames-dir", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--seconds-per-frame", type=float, default=3.0)
+    ap.add_argument("--title", default="RPA Dominio - execucao via worker (ate F8)")
+    args = ap.parse_args()
+
+    frames = sorted(glob.glob(os.path.join(args.frames_dir, "*.png")))
+    if not frames:
+        raise SystemExit(f"Nenhum frame em {args.frames_dir}")
+
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    vw = cv2.VideoWriter(args.out, fourcc, FPS, (W, H))
+    reps = max(1, int(FPS * args.seconds_per_frame))
+
+    for f in frames:
+        name = os.path.splitext(os.path.basename(f))[0]
+        frame = _compose(f, _legend_for(name), args.title)
+        for _ in range(reps):
+            vw.write(frame)
+        print(f"  + {os.path.basename(f)} -> {_legend_for(name)}")
+
+    vw.release()
+    print(f"OK: video salvo em {args.out} ({len(frames)} passos, {args.seconds_per_frame}s cada)")
+
+
+if __name__ == "__main__":
+    main()
