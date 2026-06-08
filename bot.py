@@ -428,6 +428,95 @@ class DominioBot(DesktopBot):
         import pyautogui
         pyautogui.press(key)
 
+    def _fechar_dashboard_e_modais(self):
+        """Pre-F8: dispensa modais (ex: 'Atenção') e fecha o Dashboard mirando os
+        HWNDs REAIS (nao por titulo fixo), porque o Dominio e Delphi e as classes/
+        titulos nao sao os padrao do Windows. Loga TODAS as janelas visiveis
+        (titulo|classe) em C:\\rpa\\windows_dump.txt para diagnostico. Best-effort."""
+        try:
+            import win32gui
+            import win32con
+        except ImportError:
+            print("  win32 indisponivel; pulando limpeza pre-F8.")
+            return
+        import pyautogui
+
+        dumpfile = r"C:\rpa\windows_dump.txt"
+        titulos_modal = ("atenção", "atencao", "aviso", "erro", "informação",
+                         "informacao", "confirmação", "confirmacao", "mensagem")
+
+        def _tops():
+            out = []
+
+            def cb(h, _):
+                if win32gui.IsWindowVisible(h):
+                    out.append((h, win32gui.GetClassName(h) or "",
+                                win32gui.GetWindowText(h) or ""))
+            win32gui.EnumWindows(cb, None)
+            return out
+
+        def _children(parent):
+            out = []
+
+            def cb(h, _):
+                out.append((h, win32gui.GetClassName(h) or "",
+                            win32gui.GetWindowText(h) or ""))
+            try:
+                win32gui.EnumChildWindows(parent, cb, None)
+            except Exception:
+                pass
+            return out
+
+        for i in range(6):
+            tops = _tops()
+            # --- dump diagnostico (cross-session: leio depois via run-command) ---
+            try:
+                with open(dumpfile, "a", encoding="utf-8") as f:
+                    f.write(f"\n--- passada {i} @ {datetime.now():%H:%M:%S} ---\n")
+                    for h, c, t in tops:
+                        f.write(f"TOP cls='{c}' txt='{t}'\n")
+                        for _hc, cc, tc in _children(h):
+                            if tc:
+                                f.write(f"   CHILD cls='{cc}' txt='{tc}'\n")
+            except Exception:
+                pass
+
+            fechou = False
+            # 1) MODAIS: classe #32770 (msgbox padrao), classe Delphi de mensagem,
+            #    ou titulo conhecido (Atenção/Erro/Aviso/...). Fecha via WM_CLOSE.
+            for h, c, t in tops:
+                cl, tl = c.lower(), t.lower()
+                is_modal = (c == "#32770" or "tmessage" in cl
+                            or "tmsg" in cl
+                            or any(k in tl for k in titulos_modal))
+                if is_modal and tl != "":  # nao mexe em janela sem titulo (app principal)
+                    print(f"  Fechando modal: cls='{c}' txt='{t}'")
+                    try:
+                        win32gui.PostMessage(h, win32con.WM_CLOSE, 0, 0)
+                        fechou = True
+                    except Exception:
+                        pass
+            # 2) ENTER no foreground (OK default de qualquer modal remanescente)
+            try:
+                pyautogui.press("enter")
+            except Exception:
+                pass
+            self.wait(500)
+            # 3) DASHBOARD (MDI child): fecha pelo HWND do filho via SC_CLOSE.
+            for h, c, t in tops:
+                for hc, cc, tc in _children(h):
+                    if "dashboard" in (tc or "").lower():
+                        print(f"  Fechando MDI Dashboard: cls='{cc}' txt='{tc}'")
+                        try:
+                            win32gui.PostMessage(hc, win32con.WM_SYSCOMMAND,
+                                                 win32con.SC_CLOSE, 0)
+                            fechou = True
+                        except Exception:
+                            pass
+            self.wait(900)
+            if not fechou and i >= 1:
+                break
+
     def _dismiss_any_known_dialog(self, waiting=2000):
         """Tenta fechar dialogos/janelas conhecidos. Win32 (por titulo exato)
         primeiro - mais robusto. Image matching como fallback."""
@@ -459,20 +548,7 @@ class DominioBot(DesktopBot):
         # A ORDEM IMPORTA: o modal precisa sair ANTES, senao o Ctrl+F4 nao fecha
         # o Dashboard (o modal rouba o foco) e o F8 nunca abre.
         print("  Limpando modal 'Atencao' + Dashboard antes do F8...")
-        for i in range(5):
-            # 1) modais conhecidos (Atencao/Erro/Aviso) via WM_CLOSE
-            fechou = self._dismiss_any_known_dialog(waiting=400)
-            # 2) ENTER aciona o botao OK default de qualquer modal de info remanescente
-            self.enter()
-            self.wait(600)
-            # 3) Dashboard e MDI child (FindWindow top-level nao acha) -> Ctrl+F4.
-            #    Tambem tenta WM_CLOSE por titulo, caso nao seja MDI child.
-            if not self._close_window_by_title("Dashboard"):
-                self._ctrl_f4()
-            self.wait(900)
-            # Para quando nao houver mais modal conhecido (apos a 1a passada).
-            if not fechou and i >= 1:
-                break
+        self._fechar_dashboard_e_modais()
         self.wait(800)
 
         # F8 = atalho do Dominio Contabilidade pra abrir o dialogo de selecao
