@@ -20,6 +20,9 @@ class DominioBot(DesktopBot):
     # win32 WM_CLOSE sempre que aparecerem. Mais robusto que image matching.
     _KNOWN_DISMISSABLE_WINDOWS = [
         ("Erro", "popup de erro generico (ex: Busca Convencoes)"),
+        ("Atenção", "aviso modal (ex: 'configurar empresa para Dashboards')"),
+        ("Aviso", "aviso modal generico"),
+        ("Informação", "info modal generico"),
     ]
 
     # Dialogos por imagem - fallback se win32 nao encontrar/fechar.
@@ -451,17 +454,26 @@ class DominioBot(DesktopBot):
         print("  Aguardando o modulo Contabilidade terminar de carregar (15s)...")
         self.wait(15000)
 
-        # Fecha popups e o Dashboard que bloqueiam a tela principal do Contabilidade.
-        # Dashboard eh MDI child (FindWindow nao acha) -> fallback via Ctrl+F4.
-        self._dismiss_any_known_dialog()
-        if self._close_window_by_title("Dashboard"):
-            print("  Janela 'Dashboard' fechada via WM_CLOSE.")
-        else:
-            print("  Tentando fechar Dashboard via Ctrl+F4 (MDI child close)...")
-            self._ctrl_f4()
-        self.wait(2000)
-        self._dismiss_any_known_dialog()
-        self.wait(1000)
+        # Ao abrir, a Contabilidade mostra o Dashboard + um modal "Atenção"
+        # ('É necessário configurar a empresa para emissão dos Dashboards').
+        # A ORDEM IMPORTA: o modal precisa sair ANTES, senao o Ctrl+F4 nao fecha
+        # o Dashboard (o modal rouba o foco) e o F8 nunca abre.
+        print("  Limpando modal 'Atencao' + Dashboard antes do F8...")
+        for i in range(5):
+            # 1) modais conhecidos (Atencao/Erro/Aviso) via WM_CLOSE
+            fechou = self._dismiss_any_known_dialog(waiting=400)
+            # 2) ENTER aciona o botao OK default de qualquer modal de info remanescente
+            self.enter()
+            self.wait(600)
+            # 3) Dashboard e MDI child (FindWindow top-level nao acha) -> Ctrl+F4.
+            #    Tambem tenta WM_CLOSE por titulo, caso nao seja MDI child.
+            if not self._close_window_by_title("Dashboard"):
+                self._ctrl_f4()
+            self.wait(900)
+            # Para quando nao houver mais modal conhecido (apos a 1a passada).
+            if not fechou and i >= 1:
+                break
+        self.wait(800)
 
         # F8 = atalho do Dominio Contabilidade pra abrir o dialogo de selecao
         # de empresa. Sequencia: F8 -> ALT+C (radio 'Codigo') -> TAB (caixa de
