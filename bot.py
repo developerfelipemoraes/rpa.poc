@@ -428,6 +428,48 @@ class DominioBot(DesktopBot):
         import pyautogui
         pyautogui.press(key)
 
+    def _focar_dominio(self):
+        """Traz a janela do Dominio (classe 'DisplayClientWindowClass', app streamed
+        pelo plugin) para frente, para que teclado/atalhos cheguem NELA e nao no
+        console. Escolhe a MAIOR janela dessa classe (= janela principal do app).
+        Retorna True se conseguiu focar."""
+        try:
+            import win32gui
+            import win32con
+        except ImportError:
+            return False
+        cands = []
+
+        def cb(h, _):
+            if not win32gui.IsWindowVisible(h):
+                return
+            if win32gui.GetClassName(h) == "DisplayClientWindowClass":
+                l, t, r, b = win32gui.GetWindowRect(h)
+                cands.append(((r - l) * (b - t), h, win32gui.GetWindowText(h)))
+        win32gui.EnumWindows(cb, None)
+        if not cands:
+            print("  [foco] nenhuma janela 'DisplayClientWindowClass' (Dominio nao aberto?)")
+            return False
+        cands.sort(reverse=True)  # maior area = janela principal do Dominio
+        _, hwnd, txt = cands[0]
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            win32gui.BringWindowToTop(hwnd)
+            win32gui.SetForegroundWindow(hwnd)
+            print(f"  [foco] Dominio em foco: '{txt or '(sem titulo)'}'")
+            return True
+        except Exception as e:
+            # SetForegroundWindow pode falhar por restricao do Windows; clicar tambem foca.
+            try:
+                import pyautogui
+                l, t, r, b = win32gui.GetWindowRect(hwnd)
+                pyautogui.click((l + r) // 2, t + 8)  # clica na barra de titulo
+                print(f"  [foco] foco via clique (SetForeground falhou: {e})")
+                return True
+            except Exception:
+                print(f"  [foco] WARN nao consegui focar o Dominio: {e}")
+                return False
+
     def _fechar_dashboard_e_modais(self):
         """Pre-F8: dispensa modais (ex: 'Atenção') e fecha o Dashboard mirando os
         HWNDs REAIS (nao por titulo fixo), porque o Dominio e Delphi e as classes/
@@ -467,7 +509,7 @@ class DominioBot(DesktopBot):
                 pass
             return out
 
-        for i in range(6):
+        for i in range(3):
             tops = _tops()
             # --- dump diagnostico (cross-session: leio depois via run-command) ---
             try:
@@ -481,41 +523,21 @@ class DominioBot(DesktopBot):
             except Exception:
                 pass
 
-            fechou = False
-            # 1) MODAIS: classe #32770 (msgbox padrao), classe Delphi de mensagem,
-            #    ou titulo conhecido (Atenção/Erro/Aviso/...). Fecha via WM_CLOSE.
-            for h, c, t in tops:
-                cl, tl = c.lower(), t.lower()
-                is_modal = (c == "#32770" or "tmessage" in cl
-                            or "tmsg" in cl
-                            or any(k in tl for k in titulos_modal))
-                if is_modal and tl != "":  # nao mexe em janela sem titulo (app principal)
-                    print(f"  Fechando modal: cls='{c}' txt='{t}'")
-                    try:
-                        win32gui.PostMessage(h, win32con.WM_CLOSE, 0, 0)
-                        fechou = True
-                    except Exception:
-                        pass
-            # 2) ENTER no foreground (OK default de qualquer modal remanescente)
-            try:
-                pyautogui.press("enter")
-            except Exception:
-                pass
-            self.wait(500)
-            # 3) DASHBOARD (MDI child): fecha pelo HWND do filho via SC_CLOSE.
-            for h, c, t in tops:
-                for hc, cc, tc in _children(h):
-                    if "dashboard" in (tc or "").lower():
-                        print(f"  Fechando MDI Dashboard: cls='{cc}' txt='{tc}'")
-                        try:
-                            win32gui.PostMessage(hc, win32con.WM_SYSCOMMAND,
-                                                 win32con.SC_CLOSE, 0)
-                            fechou = True
-                        except Exception:
-                            pass
+            # O Dominio e streamed (janelas 'DisplayClientWindowClass' sem titulo/
+            # controles nativos). NAO da pra fechar por win32 -> so com a janela
+            # FOCADA + teclado (o app encaminha as teclas). Sem foco, as teclas
+            # iam pro console e nada acontecia.
+            self._focar_dominio()
+            self.wait(600)
+            # ENTER = OK default do modal "Atencao"; Ctrl+F4 = fecha o Dashboard (MDI).
+            pyautogui.press("enter")
+            self.wait(700)
+            pyautogui.hotkey("ctrl", "f4")
             self.wait(900)
-            if not fechou and i >= 1:
-                break
+            # uma 2a leva (caso aparecam em sequencia)
+            self._focar_dominio()
+            pyautogui.press("enter")
+            self.wait(700)
 
     def _dismiss_any_known_dialog(self, waiting=2000):
         """Tenta fechar dialogos/janelas conhecidos. Win32 (por titulo exato)
