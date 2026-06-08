@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -31,6 +32,11 @@ class DominioBot(DesktopBot):
         via a linha-sentinela RPA_RESULT_JSON). NUNCA mais retorna None silencioso:
         cada etapa que falha vira ok=False + failed_step, e o __main__ traduz isso
         em sys.exit(1) para o worker enxergar a falha pelo returncode."""
+        # Idempotencia: garante estado LIMPO antes de comecar (fecha Dominio/
+        # Contabilidade que tenha sobrado de uma execucao anterior). Sem isso, o
+        # passo 'lista_programas' falha quando a Contabilidade ja esta aberta.
+        self._limpar_estado_inicial()
+
         steps = [
             ("login_web", self.tela_login_web),
             ("lista_programas", self.tela_lista_programas),
@@ -81,6 +87,74 @@ class DominioBot(DesktopBot):
             "errors": errors,
             "message": "fluxo completo",
         }
+
+    def _limpar_estado_inicial(self):
+        """Idempotencia de estado: fecha qualquer janela do Dominio/Contabilidade
+        remanescente de uma execucao anterior e dispensa dialogos residuais, para
+        o run comecar do zero. Best-effort: NUNCA levanta excecao.
+
+        Por que: o Dominio Contabilidade e um app desktop persistente. Se um run
+        anterior deixou a Contabilidade aberta, o passo 'lista_programas' nao acha
+        o icone para ABRIR (ela ja esta aberta) e falha. Aqui fechamos primeiro
+        via WM_CLOSE (gracioso) e, se resistir, matamos o processo dono da janela."""
+        print("\n[0/6] Limpando estado anterior (fecha Dominio/Contabilidade aberto)...")
+        try:
+            import win32gui
+            import win32con
+            import win32process
+        except ImportError:
+            print("  win32 indisponivel; pulando limpeza.")
+            return
+
+        # Marcadores de titulo de janelas do Dominio (case-insensitive).
+        markers = ("domínio", "dominio", "contabil", "thomson reuters",
+                   "trcomputer", "tr internet", "trinternet", "dashboard",
+                   "conectando", "lista de programas")
+
+        def _alvos():
+            achados = []
+
+            def cb(hwnd, _):
+                try:
+                    if not win32gui.IsWindowVisible(hwnd):
+                        return
+                    t = (win32gui.GetWindowText(hwnd) or "").strip()
+                    if t and any(m in t.lower() for m in markers):
+                        achados.append((hwnd, t))
+                except Exception:
+                    pass
+            win32gui.EnumWindows(cb, None)
+            return achados
+
+        alvos = _alvos()
+        if not alvos:
+            print("  Nada do Dominio aberto. Estado ja limpo.")
+            self._dismiss_any_known_dialog(waiting=500)
+            return
+
+        # 1) fecho gracioso via WM_CLOSE
+        for hwnd, t in alvos:
+            print(f"  Fechando janela: '{t}'")
+            try:
+                win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
+            except Exception:
+                pass
+        self.wait(3000)
+        self._dismiss_any_known_dialog(waiting=800)  # eventuais "deseja sair?"/erros
+        self.wait(1500)
+
+        # 2) sobreviventes -> mata o processo dono da janela (taskkill /F)
+        for hwnd, t in _alvos():
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                if pid:
+                    print(f"  Janela resistiu; matando PID {pid} ('{t}')")
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                   capture_output=True)
+            except Exception as e:
+                print(f"  WARN kill falhou: {e}")
+        self.wait(2000)
+        print("  Limpeza concluida.")
 
     def _record_frame(self, name):
         """Se RPA_RECORD_DIR estiver setado, salva um screenshot do desktop com
