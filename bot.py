@@ -420,6 +420,11 @@ class DominioBot(DesktopBot):
         import pyautogui
         pyautogui.hotkey("ctrl", "f4")
 
+    def _press(self, key):
+        """Pressiona uma tecla unica (ex: mnemonic de item de menu ja aberto)."""
+        import pyautogui
+        pyautogui.press(key)
+
     def _dismiss_any_known_dialog(self, waiting=2000):
         """Tenta fechar dialogos/janelas conhecidos. Win32 (por titulo exato)
         primeiro - mais robusto. Image matching como fallback."""
@@ -495,46 +500,59 @@ class DominioBot(DesktopBot):
         return True
 
     # ------------------------------------------------------------------
-    # [5/6] Navega pelo menu ate a tela de importacao
-    # TODO: ajustar o caminho do menu (ex: Movimentos -> Importacao -> ...).
+    # [5/6] Menu: Utilitarios > Importacao > Importador > Importar
+    # Navega por MNEMONICOS (letras sublinhadas), robusto e sem depender de PNG:
+    #   ALT+U (Utilitarios) -> I (Importacao) -> I (Importador) -> I (Importar)
+    # 'Importar' abre o dialogo de selecao de arquivo (tratado em [6/6]).
     # ------------------------------------------------------------------
     def navegar_para_importacao(self) -> bool:
-        print("\n[5/6] Navegando ate a tela de importacao...")
-        passos = [
-            ("menu_movimentos", "resources/menu_movimentos.png", "menu Movimentos"),
-            ("menu_importacao", "resources/menu_importacao.png", "menu Importacao"),
-        ]
-        for name, png, label in passos:
-            if not self._find_or_debug(name, png, matching=0.80, waiting=20000, label=label):
-                return False
-            self.click()
-            self.wait(800)
-        print("  OK: tela de importacao aberta.")
+        print("\n[5/6] Menu Utilitarios > Importacao > Importador > Importar...")
+        self._dismiss_any_known_dialog(waiting=500)
+
+        # ALT+U abre o menu Utilitarios (U sublinhado).
+        print("  ALT+U -> Utilitarios")
+        self._alt_key("u")
+        self.wait(1200)
+        self._record_frame("menu_utilitarios")
+
+        # Dentro do menu aberto, o mnemonic 'I' navega cada nivel (todos sublinhados em I):
+        # Importacao (submenu) -> Importador (submenu) -> Importar (comando).
+        for nivel in ("Importacao", "Importador", "Importar"):
+            print(f"  I -> {nivel}")
+            self._press("i")
+            self.wait(1200)
+            self._record_frame(f"menu_{nivel.lower()}")
+
+        print("  OK: 'Importar' acionado (dialogo de arquivo deve abrir).")
         return True
 
     # ------------------------------------------------------------------
-    # [6/6] Importa o arquivo (botao Importar -> dialogo "Abrir" -> confirma)
-    # TODO: confirmar origem/caminho do arquivo e o passo de confirmacao.
+    # [6/6] Dialogo de arquivo aberto pelo 'Importar': informa o arquivo da
+    # empresa baixada e confirma.
+    # NOTA: no fluxo manual o dialogo "sobe uma pasta" antes de achar o arquivo.
+    # Aqui digitamos o CAMINHO COMPLETO no campo 'nome do arquivo' (mais robusto
+    # que navegar pastas). A ser refinado conforme o dialogo real na VM.
     # ------------------------------------------------------------------
     def importar_arquivo(self) -> bool:
-        print("\n[6/6] Importando o arquivo...")
-        arquivo = os.getenv("ARQUIVO_IMPORTACAO", r"C:\rpa\app\dados\importar.txt")
+        print("\n[6/6] Importando o arquivo no dialogo...")
+        arquivo = os.getenv("ARQUIVO_IMPORTACAO", r"C:\rpa\inbox\notas_teste.txt")
         if not Path(arquivo).exists():
             print(f"  ERRO: arquivo de importacao nao encontrado: {arquivo}")
             return False
-        if not self._find_or_debug("btn_importar", "resources/btn_importar.png",
-                                   matching=0.80, waiting=20000, label="botao Importar"):
-            return False
-        self.click()
+
         self.wait(1500)
-        # dialogo Win32 "Abrir": digita o caminho e confirma (mesmo padrao do login do modulo)
+        self._record_frame("dialogo_arquivo")
+
+        # Campo "nome do arquivo": digita o caminho completo e confirma.
+        print(f"  Digitando caminho do arquivo: {arquivo}")
         self.kb_type(arquivo)
-        self.wait(300)
+        self.wait(500)
         self.enter()
-        self.wait(2000)
-        # TODO: confirmar a importacao + validar sucesso, ex:
-        #   if self._find_or_debug("btn_confirmar_import", "resources/btn_confirmar_import.png", waiting=10000):
-        #       self.click()
+        self.wait(2500)
+        self._record_frame("apos_importar")
+
+        # TODO (com o usuario): confirmar a tela de confirmacao da importacao
+        # e ler imported/errors em _ler_resultado_importacao().
         print(f"  OK: importacao disparada para {arquivo}.")
         return True
 
