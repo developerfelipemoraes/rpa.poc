@@ -35,6 +35,11 @@ class DominioBot(DesktopBot):
         via a linha-sentinela RPA_RESULT_JSON). NUNCA mais retorna None silencioso:
         cada etapa que falha vira ok=False + failed_step, e o __main__ traduz isso
         em sys.exit(1) para o worker enxergar a falha pelo returncode."""
+        # MINIMIZA o console do worker: lancado pela ScheduledTask, ele fica no
+        # CENTRO da tela e COBRE o launcher/Contabilidade, fazendo o image-match
+        # falhar (icone escondido atras do console). Sem isso o worker quebra em
+        # 'lista_programas' mesmo o fluxo estando certo.
+        self._minimizar_consoles()
         # Idempotencia: garante estado LIMPO antes de comecar (fecha Dominio/
         # Contabilidade que tenha sobrado de uma execucao anterior). Sem isso, o
         # passo 'lista_programas' falha quando a Contabilidade ja esta aberta.
@@ -90,6 +95,28 @@ class DominioBot(DesktopBot):
             "errors": errors,
             "message": "fluxo completo",
         }
+
+    def _minimizar_consoles(self):
+        """Minimiza janelas de console (ConsoleWindowClass). A do worker fica no
+        centro e COBRE o launcher/Contabilidade -> image-match nao acha o icone."""
+        try:
+            import win32gui
+            import win32con
+        except ImportError:
+            return
+
+        def cb(h, _):
+            if (win32gui.IsWindowVisible(h)
+                    and win32gui.GetClassName(h) == "ConsoleWindowClass"):
+                try:
+                    win32gui.ShowWindow(h, win32con.SW_MINIMIZE)
+                    print(f"  [console] minimizado: '{win32gui.GetWindowText(h)}'")
+                except Exception:
+                    pass
+        try:
+            win32gui.EnumWindows(cb, None)
+        except Exception:
+            pass
 
     def _limpar_estado_inicial(self):
         """Idempotencia de estado: fecha qualquer janela do Dominio/Contabilidade
@@ -286,6 +313,9 @@ class DominioBot(DesktopBot):
 
     def tela_lista_programas(self) -> bool:
         print("\n[2/6] Tela 'Lista de Programas' - abrindo Contabilidade...")
+        # Garante que o console nao esteja cobrindo os icones do launcher.
+        self._minimizar_consoles()
+        self.wait(400)
         if not self._find_or_debug("btn_contabilidade", "resources/btn_contabilidade.png",
                                    matching=0.75, waiting=30000, label="icone Contabilidade"):
             return False
