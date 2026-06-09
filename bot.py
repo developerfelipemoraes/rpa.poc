@@ -118,6 +118,15 @@ class DominioBot(DesktopBot):
         except Exception:
             pass
 
+    def _log_cleanup(self, msg):
+        """Registra o [0/6] em C:\\rpa\\cleanup_log.txt (sobrevive ao corte do
+        stdout_tail no result do worker). So pra auditar a validacao de RPA aberto."""
+        try:
+            with open(r"C:\rpa\cleanup_log.txt", "a", encoding="utf-8") as f:
+                f.write(f"{datetime.now():%Y-%m-%d %H:%M:%S} {msg}\n")
+        except Exception:
+            pass
+
     def _limpar_estado_inicial(self):
         """Idempotencia de estado: fecha qualquer janela do Dominio/Contabilidade
         remanescente de uma execucao anterior e dispensa dialogos residuais, para
@@ -157,14 +166,17 @@ class DominioBot(DesktopBot):
             return achados
 
         alvos = _alvos()
+        self._log_cleanup(f"[0/6] inicio; janelas RPA abertas={[t for _, t in alvos]}")
         if not alvos:
             print("  Nada do Dominio aberto. Estado ja limpo.")
+            self._log_cleanup("[0/6] nada do Dominio aberto -> estado ja limpo")
             self._dismiss_any_known_dialog(waiting=500)
             return
 
         # 1) fecho gracioso via WM_CLOSE
         for hwnd, t in alvos:
             print(f"  Fechando janela: '{t}'")
+            self._log_cleanup(f"[0/6] WM_CLOSE janela '{t}'")
             try:
                 win32gui.PostMessage(hwnd, win32con.WM_CLOSE, 0, 0)
             except Exception:
@@ -179,12 +191,14 @@ class DominioBot(DesktopBot):
                 _, pid = win32process.GetWindowThreadProcessId(hwnd)
                 if pid:
                     print(f"  Janela resistiu; matando PID {pid} ('{t}')")
+                    self._log_cleanup(f"[0/6] taskkill PID {pid} ('{t}')")
                     subprocess.run(["taskkill", "/F", "/PID", str(pid)],
                                    capture_output=True)
             except Exception as e:
                 print(f"  WARN kill falhou: {e}")
         self.wait(2000)
         print("  Limpeza concluida.")
+        self._log_cleanup("[0/6] limpeza concluida; restantes=" + str([t for _, t in _alvos()]))
 
     def _record_frame(self, name):
         """Se RPA_RECORD_DIR estiver setado, salva um screenshot do desktop com
