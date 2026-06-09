@@ -652,13 +652,14 @@ class DominioBot(DesktopBot):
 
     # ------------------------------------------------------------------
     # [5/6] Menu: Utilitarios > Importacao > Importador > Importar
-    # Mnemonic (letra sublinhada) = 'm' em cada nivel ("iMportacao", "iMportador",
-    # "iMportar"). 'm' e UNICO dentro de cada submenu -> vai direto no item certo,
-    # sem a ambiguidade dos varios itens que comecam com 'I'.
-    #   ALT+U (Utilitarios) -> m (Importacao) -> m (Importador) -> m (Importar)
+    # Mnemonics (letra sublinhada) CONFIRMADOS na tela:
+    #   - Utilitarios: ALT+U
+    #   - Importacao : 'i' (unico 'I' do menu Utilitarios; 'm' la pega 'Onvio Messenger')
+    #   - Importador : 'm' (no submenu de Importacao; 'i'/'I' la sao ambiguos)
+    #   - Importar   : 'i' (unico 'I' no submenu do Importador)
     # ------------------------------------------------------------------
     def navegar_para_importacao(self) -> bool:
-        print("\n[5/6] Menu Utilitarios > Importacao > Importador > Importar (mnemonic 'm')...")
+        print("\n[5/6] Menu Utilitarios > Importacao(i) > Importador(m) > Importar(i)...")
         self._dismiss_any_known_dialog(waiting=500)
 
         print("  ALT+U -> Utilitarios")
@@ -666,8 +667,8 @@ class DominioBot(DesktopBot):
         self.wait(1200)
         self._record_frame("menu_utilitarios")
 
-        print("  m -> Importacao (abre submenu)")
-        self._press("m")
+        print("  i -> Importacao (abre submenu)")
+        self._press("i")
         self.wait(1200)
         self._record_frame("menu_importacao")
 
@@ -676,8 +677,8 @@ class DominioBot(DesktopBot):
         self.wait(1200)
         self._record_frame("menu_importador")
 
-        print("  m -> Importar (executa; abre dialogo de arquivo)")
-        self._press("m")
+        print("  i -> Importar (executa; abre dialogo de arquivo)")
+        self._press("i")
         self.wait(1500)
         self._record_frame("menu_importar")
 
