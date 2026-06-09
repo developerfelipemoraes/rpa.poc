@@ -707,10 +707,15 @@ class DominioBot(DesktopBot):
     # ------------------------------------------------------------------
     def navegar_para_importacao(self) -> bool:
         print("\n[5/6] Menu Utilitarios > Importacao(i) > Importador(m) > Importar(i)...")
-        self._dismiss_any_known_dialog(waiting=500)
-        # Garante foco na janela da CONTABILIDADE (nao no launcher) antes do menu.
-        self._focar_dominio()
-        self.wait(500)
+        # Apos selecionar a empresa, a Contabilidade abre 'Processando Dashboard'
+        # (Carregando as informacoes dos modulos) e pode reabrir o modal 'Atenção'.
+        # Esses bloqueiam o menu. Espera o carregamento e limpa ANTES do ALT+U.
+        load_wait = int(os.getenv("DASHBOARD_LOAD_WAIT_MS", "15000"))
+        print(f"  Aguardando 'Processando Dashboard' carregar ({load_wait // 1000}s)...")
+        self.wait(load_wait)
+        self._fechar_dashboard_e_modais()   # fecha Dashboard/Atenção
+        self._focar_dominio()               # foca a Contabilidade (nao o launcher)
+        self.wait(800)
 
         print("  ALT+U -> Utilitarios")
         self._alt_key("u")
