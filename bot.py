@@ -652,40 +652,32 @@ class DominioBot(DesktopBot):
 
     # ------------------------------------------------------------------
     # [5/6] Menu: Utilitarios > Importacao > Importador > Importar
-    # CUIDADO: o submenu de 'Importacao' tem 3 itens que comecam com 'I'
-    # (Importacao Padrao, Importador, Importacao Leiautes Antigos). Apertar 'i'
-    # 1x cai no PRIMEIRO (Importacao Padrao). Por isso ciclamos ate 'Importador'.
+    # Mnemonic (letra sublinhada) = 'm' em cada nivel ("iMportacao", "iMportador",
+    # "iMportar"). 'm' e UNICO dentro de cada submenu -> vai direto no item certo,
+    # sem a ambiguidade dos varios itens que comecam com 'I'.
+    #   ALT+U (Utilitarios) -> m (Importacao) -> m (Importador) -> m (Importar)
     # ------------------------------------------------------------------
     def navegar_para_importacao(self) -> bool:
-        print("\n[5/6] Menu Utilitarios > Importacao > Importador > Importar...")
+        print("\n[5/6] Menu Utilitarios > Importacao > Importador > Importar (mnemonic 'm')...")
         self._dismiss_any_known_dialog(waiting=500)
 
-        # ALT+U abre Utilitarios; 'Importacao' e o UNICO 'I' nesse menu -> abre submenu.
         print("  ALT+U -> Utilitarios")
         self._alt_key("u")
         self.wait(1200)
         self._record_frame("menu_utilitarios")
 
-        print("  I -> Importacao (unico 'I' em Utilitarios; abre o submenu)")
-        self._press("i")
+        print("  m -> Importacao (abre submenu)")
+        self._press("m")
         self.wait(1200)
         self._record_frame("menu_importacao")
 
-        # Submenu de Importacao: 3 itens com 'I'. 'i' cicla o destaque; precisamos
-        # do 'Importador' (2o item com 'I'): pressiona 'i' duas vezes.
-        print("  I, I -> Importador (2o item com 'I' do submenu)")
-        self._press("i")
-        self.wait(600)
-        self._press("i")
-        self.wait(900)
-        self._record_frame("menu_importador_destacado")
+        print("  m -> Importador (abre submenu)")
+        self._press("m")
+        self.wait(1200)
+        self._record_frame("menu_importador")
 
-        # Abre o submenu do Importador (seta direita) e executa 'Importar' (1o item).
-        print("  Right -> abre Importador; Enter -> Importar")
-        self._press("right")
-        self.wait(1000)
-        self._record_frame("menu_importador_aberto")
-        self._press("enter")
+        print("  m -> Importar (executa; abre dialogo de arquivo)")
+        self._press("m")
         self.wait(1500)
         self._record_frame("menu_importar")
 
