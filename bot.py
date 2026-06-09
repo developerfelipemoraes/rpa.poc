@@ -289,8 +289,14 @@ class DominioBot(DesktopBot):
         if not self._find_or_debug("btn_contabilidade", "resources/btn_contabilidade.png",
                                    matching=0.75, waiting=30000, label="icone Contabilidade"):
             return False
-        self.double_click()
-        print("  OK: duplo-clique em Contabilidade.")
+        # No app streamed o double_click as vezes so SELECIONA o icone (fica azul)
+        # sem abrir (foi o que travou a execucao a6b574ea). Clicar (seleciona) +
+        # Enter (abre o icone selecionado) e mais confiavel que o duplo-clique.
+        self.click()
+        self.wait(600)
+        self.enter()
+        self.wait(1500)
+        print("  OK: Contabilidade aberta (click + Enter).")
         return True
 
     def tela_login_modulo(self) -> bool:
