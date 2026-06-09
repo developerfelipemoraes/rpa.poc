@@ -641,12 +641,13 @@ class DominioBot(DesktopBot):
         self.kb_type(empresa)
         self.wait(2500)  # tempo da lista filtrar
 
-        # ENTER = seleciona empresa highlighted (equivalente ao duplo-clique).
-        print("  ENTER -> selecionando empresa filtrada (equivale a duplo-clique)...")
-        self.enter()
+        # Botao "Acessar" (mnemonic ALT+A) confirma a empresa filtrada.
+        # ENTER fazia duplo-clique e ABRIA a janela da empresa (errado).
+        print("  ALT+A -> botao 'Acessar' (confirma a empresa filtrada)...")
+        self._alt_key("a")
         self.wait(3000)
 
-        print(f"  OK: empresa {empresa} selecionada (via F8 + ALT+C + ENTER).")
+        print(f"  OK: empresa {empresa} acessada (F8 + codigo + Acessar).")
         return True
 
     # ------------------------------------------------------------------
