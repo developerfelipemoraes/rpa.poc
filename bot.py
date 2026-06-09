@@ -428,6 +428,46 @@ class DominioBot(DesktopBot):
         import pyautogui
         pyautogui.press(key)
 
+    def _dismiss_dominio_modais(self):
+        """Fecha os modais do Dominio (janelas top-level 'DisplayClientWindowClass'
+        com titulo EXATO 'Atenção'/'Erro'/'Aviso'/...). Foca CADA modal e pressiona
+        Enter (= botao OK). NUNCA usa WM_CLOSE: no Dominio isso derruba o app todo.
+        Retorna quantos modais tratou."""
+        try:
+            import win32gui
+        except ImportError:
+            return 0
+        import pyautogui
+        import time
+        MODAIS = ("atenção", "atencao", "aviso", "erro", "informação",
+                  "informacao", "confirmação", "confirmacao", "mensagem")
+        achados = []
+
+        def cb(h, _):
+            if (win32gui.IsWindowVisible(h)
+                    and win32gui.GetClassName(h) == "DisplayClientWindowClass"):
+                t = win32gui.GetWindowText(h) or ""
+                if t.strip().lower() in MODAIS:   # titulo EXATO -> nao pega o app principal
+                    achados.append((h, t))
+        win32gui.EnumWindows(cb, None)
+
+        for h, t in achados:
+            print(f"  Modal '{t}' -> Enter (OK)")
+            try:
+                win32gui.SetForegroundWindow(h)
+                time.sleep(0.3)
+                pyautogui.press("enter")
+                time.sleep(0.5)
+            except Exception as e:
+                # se nao focar, tenta clicar no centro-baixo do modal (onde fica o OK)
+                try:
+                    l, top, r, b = win32gui.GetWindowRect(h)
+                    pyautogui.click((l + r) // 2, b - 25)
+                    print(f"  Modal '{t}' -> clique no OK (foco falhou: {e})")
+                except Exception:
+                    print(f"  WARN modal '{t}': {e}")
+        return len(achados)
+
     def _focar_dominio(self):
         """Traz a janela do Dominio (classe 'DisplayClientWindowClass', app streamed
         pelo plugin) para frente, para que teclado/atalhos cheguem NELA e nao no
@@ -523,21 +563,18 @@ class DominioBot(DesktopBot):
             except Exception:
                 pass
 
-            # O Dominio e streamed (janelas 'DisplayClientWindowClass' sem titulo/
-            # controles nativos). NAO da pra fechar por win32 -> so com a janela
-            # FOCADA + teclado (o app encaminha as teclas). Sem foco, as teclas
-            # iam pro console e nada acontecia.
+            # 1) Dispensa o(s) modal(is) do Dominio (Atenção/Erro/...) focando CADA
+            #    UM pelo titulo exato e dando Enter (OK). Antes eu focava o app
+            #    principal (maior janela) e o Enter ia pra ele, nao pro modal.
+            n_modais = self._dismiss_dominio_modais()
+            # 2) Fecha o Dashboard (MDI child): foca o app principal + Ctrl+F4.
             self._focar_dominio()
-            self.wait(600)
-            # ENTER = OK default do modal "Atencao"; Ctrl+F4 = fecha o Dashboard (MDI).
-            pyautogui.press("enter")
-            self.wait(700)
+            self.wait(400)
             pyautogui.hotkey("ctrl", "f4")
             self.wait(900)
-            # uma 2a leva (caso aparecam em sequencia)
-            self._focar_dominio()
-            pyautogui.press("enter")
-            self.wait(700)
+            # Para quando nao houver mais modal (apos a 1a passada).
+            if n_modais == 0 and i >= 1:
+                break
 
     def _dismiss_any_known_dialog(self, waiting=2000):
         """Tenta fechar dialogos/janelas conhecidos. Win32 (por titulo exato)
