@@ -485,18 +485,26 @@ class DominioBot(DesktopBot):
         except ImportError:
             return False
         cands = []
+        # NUNCA focar o launcher 'Lista de Programas' nem modais: o alvo e a janela
+        # do MODULO (Contabilidade), que vem com titulo VAZIO. Quando as duas estao
+        # abertas, focar a maior pegava o launcher (bug) -> F8/menu iam pro lugar errado.
+        EXCLUIR = ("lista de programas", "atenção", "atencao", "aviso", "erro",
+                   "informação", "informacao", "confirmação", "confirmacao", "mensagem")
 
         def cb(h, _):
             if not win32gui.IsWindowVisible(h):
                 return
             if win32gui.GetClassName(h) == "DisplayClientWindowClass":
-                l, t, r, b = win32gui.GetWindowRect(h)
-                cands.append(((r - l) * (b - t), h, win32gui.GetWindowText(h)))
+                t = (win32gui.GetWindowText(h) or "").strip()
+                if t.lower() in EXCLUIR:
+                    return  # pula launcher e modais
+                l, top, r, b = win32gui.GetWindowRect(h)
+                cands.append(((r - l) * (b - top), h, t))
         win32gui.EnumWindows(cb, None)
         if not cands:
-            print("  [foco] nenhuma janela 'DisplayClientWindowClass' (Dominio nao aberto?)")
+            print("  [foco] janela do MODULO (Contabilidade) nao encontrada (so launcher/modal?)")
             return False
-        cands.sort(reverse=True)  # maior area = janela principal do Dominio
+        cands.sort(reverse=True)  # maior modulo = Contabilidade
         _, hwnd, txt = cands[0]
         try:
             win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
@@ -618,6 +626,9 @@ class DominioBot(DesktopBot):
         print("  Limpando modal 'Atencao' + Dashboard antes do F8...")
         self._fechar_dashboard_e_modais()
         self.wait(800)
+        # Garante foco na janela da CONTABILIDADE (nao no launcher) antes do F8.
+        self._focar_dominio()
+        self.wait(500)
 
         # F8 = atalho do Dominio Contabilidade pra abrir o dialogo de selecao
         # de empresa. Sequencia: F8 -> ALT+C (radio 'Codigo') -> TAB (caixa de
@@ -667,6 +678,9 @@ class DominioBot(DesktopBot):
     def navegar_para_importacao(self) -> bool:
         print("\n[5/6] Menu Utilitarios > Importacao(i) > Importador(m) > Importar(i)...")
         self._dismiss_any_known_dialog(waiting=500)
+        # Garante foco na janela da CONTABILIDADE (nao no launcher) antes do menu.
+        self._focar_dominio()
+        self.wait(500)
 
         print("  ALT+U -> Utilitarios")
         self._alt_key("u")
