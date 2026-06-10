@@ -97,8 +97,9 @@ class DominioBot(DesktopBot):
         }
 
     def _minimizar_consoles(self):
-        """Minimiza janelas de console (ConsoleWindowClass). A do worker fica no
-        centro e COBRE o launcher/Contabilidade -> image-match nao acha o icone."""
+        """Minimiza janelas que ATRAPALHAM (cobrem o launcher/Contabilidade) e
+        fazem o image-match falhar: o console do worker (ConsoleWindowClass) e o
+        'Server Manager' (que o Windows Server abre sozinho no logon)."""
         try:
             import win32gui
             import win32con
@@ -106,11 +107,14 @@ class DominioBot(DesktopBot):
             return
 
         def cb(h, _):
-            if (win32gui.IsWindowVisible(h)
-                    and win32gui.GetClassName(h) == "ConsoleWindowClass"):
+            if not win32gui.IsWindowVisible(h):
+                return
+            cls = win32gui.GetClassName(h) or ""
+            txt = win32gui.GetWindowText(h) or ""
+            if cls == "ConsoleWindowClass" or "server manager" in txt.lower():
                 try:
                     win32gui.ShowWindow(h, win32con.SW_MINIMIZE)
-                    print(f"  [console] minimizado: '{win32gui.GetWindowText(h)}'")
+                    print(f"  [min] minimizado: cls='{cls}' txt='{txt}'")
                 except Exception:
                     pass
         try:
@@ -755,33 +759,144 @@ class DominioBot(DesktopBot):
         return True
 
     # ------------------------------------------------------------------
-    # [6/6] Dialogo de arquivo aberto pelo 'Importar': informa o arquivo da
-    # empresa baixada e confirma.
-    # NOTA: no fluxo manual o dialogo "sobe uma pasta" antes de achar o arquivo.
-    # Aqui digitamos o CAMINHO COMPLETO no campo 'nome do arquivo' (mais robusto
-    # que navegar pastas). A ser refinado conforme o dialogo real na VM.
+    # Helper: no grupo 'Arquivo' da tela 'Importacao de Arquivo', garante que
+    # o campo 'Tipo' esteja em XML. Clica no combo e seleciona o item XML.
+    # ------------------------------------------------------------------
+    def _selecionar_tipo_xml(self) -> bool:
+        print("  Tipo -> XML (combo do grupo 'Arquivo')...")
+        # Ancora no rotulo ESTAVEL 'Tipo:' e clica no combo a direita via offset
+        # (o interior do combo so fica destacado quando focado -> nao da pra
+        # templatar; ja o rotulo e sempre igual). get_last_x/y = centro do match.
+        if not self._find_or_debug("lbl_tipo", "resources/lbl_tipo.png",
+                                   matching=0.85, waiting=15000, label="rotulo 'Tipo:'"):
+            return False
+        self.click_at(self.get_last_x() + 73, self.get_last_y() + 2)  # combo, a direita
+        self.wait(600)
+        # Combo read-only do Dominio: digitar o texto pula pro item ('X' -> XML);
+        # Enter confirma o item destacado e fecha o dropdown.
+        self.kb_type("XML")
+        self.wait(400)
+        self.enter()
+        self.wait(600)
+        self._record_frame("tipo_xml")
+        print("  OK: Tipo = XML.")
+        return True
+
+    # ------------------------------------------------------------------
+    # Helper: navega a treeview do dialogo 'Procurar Pasta' (SHBrowseForFolder)
+    # ate `pasta` e clica OK. A arvore aceita teclado: digitar o nome pula pro no
+    # irmao; seta-direita expande/entra nos filhos. NAO usamos win32 BFFM_SETSELECTION
+    # porque o dialogo roda em OUTRO processo (app streamed) e o ponteiro da string
+    # nao cruza o limite de processo -> navegacao por teclado e o caminho confiavel.
+    # ------------------------------------------------------------------
+    def _procurar_pasta_e_ok(self, pasta: str) -> bool:
+        import pyautogui
+        import time
+        pasta = pasta.replace("/", "\\")
+        print(f"  'Procurar Pasta' -> navegando ate {pasta} e OK...")
+        self.wait(900)
+
+        # 'C:\\rpa\\inbox' -> ['rpa', 'inbox'] (a raiz do drive C: ja e o topo da arvore)
+        _drive, _, rest = pasta.partition("\\")
+        segs = [s for s in rest.split("\\") if s]
+
+        pyautogui.press("home")           # topo da arvore (raiz do drive C:\)
+        time.sleep(0.5)
+        for i, seg in enumerate(segs):
+            if i > 0:
+                pyautogui.press("right")  # entra nos filhos do no expandido
+                time.sleep(0.5)
+            pyautogui.typewrite(seg[:10], interval=0.06)  # pula pro no irmao pelo nome
+            time.sleep(0.7)
+            if i < len(segs) - 1:
+                pyautogui.press("right")  # expande este no p/ revelar os filhos
+                time.sleep(0.5)
+        self._record_frame("procurar_pasta")
+
+        # OK: prioriza o template (resources/btn_ok_procurar_pasta.png); se ainda
+        # nao foi capturado, _find_or_debug salva um debug_*_MISSING e caimos no
+        # Enter (OK e o botao default do dialogo).
+        if self._find_or_debug("btn_ok_procurar_pasta", "resources/btn_ok_procurar_pasta.png",
+                               matching=0.80, waiting=8000, label="botao OK (Procurar Pasta)"):
+            self.click()
+        else:
+            print("  (template do OK ausente -> Enter = OK default do dialogo)")
+            self.enter()
+        self.wait(1500)
+        return True
+
+    # ------------------------------------------------------------------
+    # [6/6] Tela 'Importacao de Arquivo' (aberta pelo 'Importar'):
+    #   1) Tipo = XML;
+    #   2) botao "..." abre o 'Procurar Pasta';
+    #   3) no 'Procurar Pasta', seleciona a PASTA local do XML (baixado do blob
+    #      pelo worker) e clica OK;
+    #   4) o campo 'Caminho' recebe o caminho COMPLETO do arquivo .xml;
+    #   5) OK final -> dispara a importacao.
     # ------------------------------------------------------------------
     def importar_arquivo(self) -> bool:
-        print("\n[6/6] Importando o arquivo no dialogo...")
+        print("\n[6/6] Importando o arquivo (tela 'Importacao de Arquivo')...")
         arquivo = os.getenv("ARQUIVO_IMPORTACAO", r"C:\rpa\inbox\notas_teste.txt")
         if not Path(arquivo).exists():
             print(f"  ERRO: arquivo de importacao nao encontrado: {arquivo}")
             return False
 
         self.wait(1500)
+        self._dismiss_any_known_dialog()
         self._record_frame("dialogo_arquivo")
 
-        # Campo "nome do arquivo": digita o caminho completo e confirma.
-        print(f"  Digitando caminho do arquivo: {arquivo}")
-        self.kb_type(arquivo)
-        self.wait(500)
-        self.enter()
+        # 1) Tipo do arquivo = XML.
+        if not self._selecionar_tipo_xml():
+            return False
+
+        # 2) Botao "..." (reticencias) abre o 'Procurar Pasta'.
+        print("  Clicando no botao '...' para localizar o arquivo...")
+        if not self._find_or_debug("btn_localizar_arquivo", "resources/btn_localizar_arquivo.png",
+                                   matching=0.80, waiting=15000, label="botao '...' (localizar arquivo)"):
+            return False
+        self.click()
+        self.wait(1500)
+        self._record_frame("localizar_arquivo")
+
+        # 3) 'Procurar Pasta': seleciona a PASTA local onde o XML foi baixado do blob e OK.
+        pasta = os.path.dirname(arquivo)
+        if not self._procurar_pasta_e_ok(pasta):
+            return False
+        self.wait(1500)
+        self._record_frame("pasta_selecionada")
+
+        # 4) Campo 'Caminho' recebe o caminho COMPLETO do arquivo .xml (sobrescreve
+        #    o que o 'Procurar Pasta' deixou - que era so a pasta).
+        print(f"  Preenchendo 'Caminho' com o arquivo: {arquivo}")
+        # Ancora no rotulo 'Caminho:' e clica no campo a direita (offset do centro).
+        if not self._find_or_debug("lbl_caminho", "resources/lbl_caminho.png",
+                                   matching=0.85, waiting=10000, label="rotulo 'Caminho:'"):
+            return False
+        self.click_at(self.get_last_x() + 67, self.get_last_y() + 2)  # campo 'Caminho'
+        self.wait(300)
+        self.control_a()       # seleciona o conteudo atual (a pasta deixada pelo browse)
+        self.wait(100)
+        self.kb_type(arquivo)  # sobrescreve com o caminho completo do .xml
+        self.wait(400)
+        self._record_frame("caminho_preenchido")
+
+        # 5) OK final -> dispara a importacao. O botao OK nao aparece na captura
+        #    (fica abaixo da area visivel); como e o botao DEFAULT do dialogo,
+        #    Enter aciona. Se um template 'btn_ok_importacao' for capturado depois,
+        #    ele tem prioridade (clique no botao).
+        print("  Confirmando importacao (OK)...")
+        if self._find_or_debug("btn_ok_importacao", "resources/btn_ok_importacao.png",
+                               matching=0.80, waiting=8000, label="botao OK (importar)"):
+            self.click()
+        else:
+            print("  (template do OK ausente -> Enter = OK default do dialogo)")
+            self.enter()
         self.wait(2500)
         self._record_frame("apos_importar")
 
         # TODO (com o usuario): confirmar a tela de confirmacao da importacao
         # e ler imported/errors em _ler_resultado_importacao().
-        print(f"  OK: importacao disparada para {arquivo}.")
+        print(f"  OK: importacao disparada (Tipo=XML, arquivo={arquivo}).")
         return True
 
 
