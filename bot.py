@@ -860,6 +860,20 @@ class DominioBot(DesktopBot):
         self._dismiss_any_known_dialog()
         self._record_frame("dialogo_arquivo")
 
+        # MODO DE MAPEAMENTO: RPA_MAP_FORM=1 -> NAO preenche nada; so captura o foco
+        # inicial e o efeito de cada Tab, pra mapear a ordem dos campos do formulario
+        # e depois codar o [6/6] 100% por teclado (sem clique/offset por pixel).
+        if os.getenv("RPA_MAP_FORM", "").strip().lower() in ("1", "true", "yes", "sim"):
+            print("  [MAP] mapeando ordem do Tab do formulario...")
+            import pyautogui
+            self._record_frame("map00_inicial")
+            for i in range(1, 9):
+                pyautogui.press("tab")
+                self.wait(600)
+                self._record_frame(f"map{i:02d}_tab")
+            print("  [MAP] mapeamento concluido (8 tabs).")
+            return True
+
         # 1) Tipo do arquivo = XML.
         if not self._selecionar_tipo_xml():
             return False
