@@ -217,9 +217,11 @@ def compose_and_upload_video(blob_svc, job_id, codigo, record_dir):
             return None
         out_mp4 = os.path.join(record_dir, f"{codigo}_{job_id}.mp4")
         title = f"RPA Dominio - empresa {codigo} - exec {job_id}"
+        servidor = os.getenv("COMPUTERNAME", "vm-rpadom-dev")
         r = subprocess.run(
             [PY_EXE, MAKE_VIDEO_PY, "--frames-dir", record_dir,
-             "--out", out_mp4, "--title", title],
+             "--out", out_mp4, "--title", title,
+             "--server", servidor, "--job", str(job_id)],
             capture_output=True, text=True, timeout=300,
         )
         if r.returncode != 0 or not os.path.isfile(out_mp4):
@@ -254,7 +256,11 @@ def process_job(blob_svc, job):
     for emp in job.get("empresas", []):
         codigo    = emp["codigo"]
         blob_path = emp["arquivo_blob"]
-        local     = os.path.join(INBOX_LOCAL, f"{job_id}_{codigo}.txt")
+        # Baixa o arquivo do blob para uma PASTA por job/empresa, preservando o
+        # nome/extensao reais (.xml). O bot seleciona ESSA pasta no 'Procurar Pasta'
+        # e usa o caminho completo do arquivo no campo 'Caminho'.
+        fname     = os.path.basename(blob_path) or f"{job_id}_{codigo}.xml"
+        local     = os.path.join(INBOX_LOCAL, f"{job_id}_{codigo}", fname)
 
         try:
             download_file(blob_svc, blob_path, local)
