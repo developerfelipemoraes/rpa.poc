@@ -886,20 +886,30 @@ class DominioBot(DesktopBot):
         self.wait(600)
         self._record_frame("tipo_xml")
 
-        # 2) Tab -> botao "..."; SPACE aciona o botao e abre o 'Procurar Pasta'
-        #    (sem clique por pixel -> nao descarrila mais pro modulo 'Administrar').
-        print("  Tab -> '...'; Space abre 'Procurar Pasta'")
+        # 2) Tab -> botao "..."; SPACE aciona e abre a 'Selecao de arquivos'
+        #    (p/ XML NAO e 'Procurar Pasta' e sim um dialogo com campo Caminho +
+        #    lista de arquivos XML da pasta + botoes Atualizar/Todos/OK).
+        print("  Tab -> '...'; Space abre 'Selecao de arquivos'")
         self._press("tab")
         self.wait(500)
         self._press("space")
         self.wait(1800)
-        self._record_frame("procurar_pasta_aberto")
+        self._dismiss_any_known_dialog()   # fecha eventual erro 'caminho invalido'
+        self._record_frame("selecao_arquivos_aberto")
 
-        # 3) 'Procurar Pasta': navega a arvore por TECLADO ate a pasta do XML e OK.
+        # 3) Campo 'Caminho' da 'Selecao de arquivos' (foco abre nele): limpa e
+        #    digita a PASTA onde o worker baixou os XML; Atualizar/Enter lista.
         pasta = os.path.dirname(arquivo)
-        if not self._procurar_pasta_e_ok(pasta):
-            return False
-        self.wait(1200)
+        print(f"  Digitando a pasta dos XML em 'Caminho': {pasta}")
+        self.control_a()
+        self.wait(100)
+        self.kb_type(pasta)
+        self.wait(400)
+        self.enter()                       # carrega a lista de XML da pasta
+        self.wait(1800)
+        self._record_frame("arquivos_listados")
+        # TODO (mapear nesta tela): selecionar arquivos (Todos) + OK -> volta o
+        # Caminho preenchido no form de importacao.
         self._record_frame("caminho_preenchido")
 
         # MODO DE TESTE: RPA_DRY_IMPORT=1 para ANTES do OK final - deixa a tela
