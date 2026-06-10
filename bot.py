@@ -913,18 +913,18 @@ class DominioBot(DesktopBot):
         self.wait(500)
         self._record_frame("selecao_arquivos_aberto")
 
-        # 3) Campo 'Caminho' da 'Selecao de arquivos': limpa e COLA a PASTA via
-        #    clipboard (atomico -> sem corrida de foco/autocomplete que corrompia
-        #    o caminho). Enter carrega a lista de XML da pasta.
+        # 3) Na 'Selecao de arquivos', clica no "..." DELA pra abrir o navegador
+        #    do file system (fluxo do usuario). Foco abre no campo 'Caminho' ->
+        #    Tab cai no "..." -> Space abre o file system.
         pasta = os.path.dirname(arquivo)
-        print(f"  Colando a pasta dos XML em 'Caminho': {pasta}")
-        self._set_clipboard(pasta)
-        self.control_a()
-        self.wait(150)
-        pyautogui.hotkey("ctrl", "v")
+        print("  Tab -> '...' (da Selecao de arquivos); Space abre o file system")
+        self._press("tab")
         self.wait(500)
-        self.enter()                       # carrega a lista de XML da pasta
-        self.wait(2000)
+        self._press("space")
+        self.wait(2500)
+        self._record_frame("fs_browser")
+        # (proximos passos: navegar o file system ate a pasta e selecionar -
+        #  a mapear conforme o dialogo que abrir)
         self._record_frame("arquivos_listados")
         # TODO (mapear nesta tela): selecionar arquivos (Todos) + OK -> volta o
         # Caminho preenchido no form de importacao.
