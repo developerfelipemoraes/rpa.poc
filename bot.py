@@ -874,21 +874,32 @@ class DominioBot(DesktopBot):
             print("  [MAP] mapeamento concluido (8 tabs).")
             return True
 
-        # 1) Tipo do arquivo = XML.
-        if not self._selecionar_tipo_xml():
-            return False
+        # Navegacao 100% TECLADO (sem clique/offset por pixel -> imune a resolucao).
+        # Ordem do form mapeada: Tipo(foco inicial) -> Tab -> "..." -> Tab -> Conjunto.
+        # O campo 'Caminho' NAO entra no Tab: e preenchido pelo "..." (Procurar Pasta);
+        # a importacao XML e por PASTA (a pasta onde o worker baixou o(s) XML(s)).
 
-        # 2) Campo 'Caminho': digita o CAMINHO COMPLETO direto (robusto e sem
-        #    depender de resolucao). Largamos o "..."/Procurar Pasta porque o
-        #    clique por offset caia fora e descarrilava pro modulo 'Administrar'.
-        #    Apos o Tipo (Enter fecha o combo, foco fica nele), TAB -> 'Caminho'.
-        print(f"  Preenchendo 'Caminho' (Tab + caminho completo): {arquivo}")
-        self.tab()
-        self.wait(400)
-        self.control_a()       # limpa o conteudo atual do campo
-        self.wait(100)
-        self.kb_type(arquivo)  # caminho completo do .xml
-        self.wait(400)
+        # 1) Tipo = XML  (o combo 'Tipo' ja esta FOCADO ao abrir o form; combo
+        #    read-only -> digitar pula pro item XML; Tab depois confirma e avanca).
+        print("  Tipo -> XML (teclado; combo ja focado)")
+        self.kb_type("XML")
+        self.wait(600)
+        self._record_frame("tipo_xml")
+
+        # 2) Tab -> botao "..."; SPACE aciona o botao e abre o 'Procurar Pasta'
+        #    (sem clique por pixel -> nao descarrila mais pro modulo 'Administrar').
+        print("  Tab -> '...'; Space abre 'Procurar Pasta'")
+        self._press("tab")
+        self.wait(500)
+        self._press("space")
+        self.wait(1800)
+        self._record_frame("procurar_pasta_aberto")
+
+        # 3) 'Procurar Pasta': navega a arvore por TECLADO ate a pasta do XML e OK.
+        pasta = os.path.dirname(arquivo)
+        if not self._procurar_pasta_e_ok(pasta):
+            return False
+        self.wait(1200)
         self._record_frame("caminho_preenchido")
 
         # MODO DE TESTE: RPA_DRY_IMPORT=1 para ANTES do OK final - deixa a tela
