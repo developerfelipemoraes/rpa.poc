@@ -313,13 +313,28 @@ class DominioBot(DesktopBot):
                 except PlaywrightTimeout:
                     print("  Sem tela de aviso pos-login")
 
-                # aguarda o protocolo TRComputerPluginWindows disparar
-                print("  Aguardando 15s pro plugin abrir...")
-                page.wait_for_timeout(15000)
+                # O plugin TRComputerPluginWindows abre a 'Lista de Programas'. O
+                # tempo varia (pior com a tela 'Continuar'). Em vez de esperar 15s
+                # cegos, fazemos POLL ate a janela 'Lista de Programas' aparecer
+                # (ate ~50s) antes de fechar o browser -> evita seguir sem launcher.
+                print("  Aguardando o plugin abrir a 'Lista de Programas' (poll ate 50s)...")
+                launcher_ok = False
+                try:
+                    import win32gui
+                    import time as _time
+                    deadline = _time.time() + 50
+                    while _time.time() < deadline:
+                        page.wait_for_timeout(2500)
+                        if win32gui.FindWindow(None, "Lista de Programas"):
+                            launcher_ok = True
+                            break
+                except Exception as e:
+                    print(f"  WARN poll do launcher falhou: {e}; fallback 15s")
+                    page.wait_for_timeout(15000)
                 self._record_frame("plugin_abrindo")
 
                 ctx.close()
-                print("  OK: login web concluido.")
+                print(f"  OK: login web concluido (launcher {'DETECTADO' if launcher_ok else 'nao detectado'}).")
                 return True
             except Exception as e:
                 print(f"  ERRO no login web: {e}")
@@ -879,6 +894,14 @@ class DominioBot(DesktopBot):
         self.kb_type(arquivo)  # sobrescreve com o caminho completo do .xml
         self.wait(400)
         self._record_frame("caminho_preenchido")
+
+        # MODO DE TESTE: RPA_DRY_IMPORT=1 para ANTES do OK final - deixa a tela
+        # toda preenchida (Tipo=XML, Caminho=arquivo) mas NAO dispara a importacao.
+        # Usado para validar offsets/navegacao sem efeito colateral.
+        if os.getenv("RPA_DRY_IMPORT", "").strip().lower() in ("1", "true", "yes", "sim"):
+            print("  [DRY] RPA_DRY_IMPORT ligado -> NAO clica OK; tela preenchida e preservada.")
+            self._record_frame("dry_sem_ok")
+            return True
 
         # 5) OK final -> dispara a importacao. O botao OK nao aparece na captura
         #    (fica abaixo da area visivel); como e o botao DEFAULT do dialogo,
