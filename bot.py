@@ -864,34 +864,16 @@ class DominioBot(DesktopBot):
         if not self._selecionar_tipo_xml():
             return False
 
-        # 2) Botao "..." (reticencias) abre o 'Procurar Pasta'.
-        print("  Clicando no botao '...' para localizar o arquivo...")
-        if not self._find_or_debug("btn_localizar_arquivo", "resources/btn_localizar_arquivo.png",
-                                   matching=0.80, waiting=15000, label="botao '...' (localizar arquivo)"):
-            return False
-        self.click()
-        self.wait(1500)
-        self._record_frame("localizar_arquivo")
-
-        # 3) 'Procurar Pasta': seleciona a PASTA local onde o XML foi baixado do blob e OK.
-        pasta = os.path.dirname(arquivo)
-        if not self._procurar_pasta_e_ok(pasta):
-            return False
-        self.wait(1500)
-        self._record_frame("pasta_selecionada")
-
-        # 4) Campo 'Caminho' recebe o caminho COMPLETO do arquivo .xml (sobrescreve
-        #    o que o 'Procurar Pasta' deixou - que era so a pasta).
-        print(f"  Preenchendo 'Caminho' com o arquivo: {arquivo}")
-        # Ancora no rotulo 'Caminho:' e clica no campo a direita (offset do centro).
-        if not self._find_or_debug("lbl_caminho", "resources/lbl_caminho.png",
-                                   matching=0.85, waiting=10000, label="rotulo 'Caminho:'"):
-            return False
-        self.click_at(self.get_last_x() + 67, self.get_last_y() + 2)  # campo 'Caminho'
-        self.wait(300)
-        self.control_a()       # seleciona o conteudo atual (a pasta deixada pelo browse)
+        # 2) Campo 'Caminho': digita o CAMINHO COMPLETO direto (robusto e sem
+        #    depender de resolucao). Largamos o "..."/Procurar Pasta porque o
+        #    clique por offset caia fora e descarrilava pro modulo 'Administrar'.
+        #    Apos o Tipo (Enter fecha o combo, foco fica nele), TAB -> 'Caminho'.
+        print(f"  Preenchendo 'Caminho' (Tab + caminho completo): {arquivo}")
+        self.tab()
+        self.wait(400)
+        self.control_a()       # limpa o conteudo atual do campo
         self.wait(100)
-        self.kb_type(arquivo)  # sobrescreve com o caminho completo do .xml
+        self.kb_type(arquivo)  # caminho completo do .xml
         self.wait(400)
         self._record_frame("caminho_preenchido")
 
