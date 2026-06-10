@@ -497,6 +497,20 @@ class DominioBot(DesktopBot):
         import pyautogui
         pyautogui.press(key)
 
+    def _set_clipboard(self, text):
+        """Coloca texto no clipboard (pra colar caminhos com Ctrl+V - mais
+        confiavel que digitar: evita autocomplete/race/chars perdidos no campo)."""
+        try:
+            import win32clipboard
+            win32clipboard.OpenClipboard()
+            win32clipboard.EmptyClipboard()
+            win32clipboard.SetClipboardText(text, win32clipboard.CF_UNICODETEXT)
+            win32clipboard.CloseClipboard()
+            return True
+        except Exception as e:
+            print(f"  WARN clipboard: {e}")
+            return False
+
     def _dismiss_dominio_modais(self):
         """Fecha os modais do Dominio (janelas top-level 'DisplayClientWindowClass'
         com titulo EXATO 'Atenção'/'Erro'/'Aviso'/...). Foca CADA modal e pressiona
@@ -889,24 +903,28 @@ class DominioBot(DesktopBot):
         # 2) Tab -> botao "..."; SPACE aciona e abre a 'Selecao de arquivos'
         #    (p/ XML NAO e 'Procurar Pasta' e sim um dialogo com campo Caminho +
         #    lista de arquivos XML da pasta + botoes Atualizar/Todos/OK).
+        import pyautogui
         print("  Tab -> '...'; Space abre 'Selecao de arquivos'")
         self._press("tab")
         self.wait(500)
         self._press("space")
-        self.wait(1800)
+        self.wait(3000)                    # ESPERA a 'Selecao de arquivos' abrir
         self._dismiss_any_known_dialog()   # fecha eventual erro 'caminho invalido'
+        self.wait(500)
         self._record_frame("selecao_arquivos_aberto")
 
-        # 3) Campo 'Caminho' da 'Selecao de arquivos' (foco abre nele): limpa e
-        #    digita a PASTA onde o worker baixou os XML; Atualizar/Enter lista.
+        # 3) Campo 'Caminho' da 'Selecao de arquivos': limpa e COLA a PASTA via
+        #    clipboard (atomico -> sem corrida de foco/autocomplete que corrompia
+        #    o caminho). Enter carrega a lista de XML da pasta.
         pasta = os.path.dirname(arquivo)
-        print(f"  Digitando a pasta dos XML em 'Caminho': {pasta}")
+        print(f"  Colando a pasta dos XML em 'Caminho': {pasta}")
+        self._set_clipboard(pasta)
         self.control_a()
-        self.wait(100)
-        self.kb_type(pasta)
-        self.wait(400)
+        self.wait(150)
+        pyautogui.hotkey("ctrl", "v")
+        self.wait(500)
         self.enter()                       # carrega a lista de XML da pasta
-        self.wait(1800)
+        self.wait(2000)
         self._record_frame("arquivos_listados")
         # TODO (mapear nesta tela): selecionar arquivos (Todos) + OK -> volta o
         # Caminho preenchido no form de importacao.
