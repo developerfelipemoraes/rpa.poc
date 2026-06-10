@@ -18,6 +18,7 @@ import sys
 import json
 import time
 import base64
+import shutil
 import msvcrt
 import traceback
 import subprocess
@@ -35,7 +36,8 @@ from azure.core.exceptions import ResourceNotFoundError
 load_dotenv()
 
 STORAGE_ACCOUNT = os.getenv("STORAGE_ACCOUNT", "strpadomdevye0m9")
-QUEUE_NAME      = os.getenv("QUEUE_NAME", "rpa-jobs")
+QUEUE_NAME       = os.getenv("QUEUE_NAME", "rpa-jobs")
+ERROR_QUEUE_NAME = os.getenv("ERROR_QUEUE_NAME", "rpa-jobs-erro")  # dead-letter p/ retry
 FILES_CONTAINER   = "rpa-files"
 RESULTS_CONTAINER = "rpa-results"
 
@@ -97,16 +99,59 @@ def now_iso():
 
 def build_clients():
     cred = ManagedIdentityCredential(client_id=MI_CLIENT_ID)
-    queue = QueueClient(
-        account_url=f"https://{STORAGE_ACCOUNT}.queue.core.windows.net",
-        queue_name=QUEUE_NAME,
-        credential=cred,
-    )
+    qurl = f"https://{STORAGE_ACCOUNT}.queue.core.windows.net"
+    queue = QueueClient(account_url=qurl, queue_name=QUEUE_NAME, credential=cred)
+    error_queue = QueueClient(account_url=qurl, queue_name=ERROR_QUEUE_NAME, credential=cred)
     blob = BlobServiceClient(
         account_url=f"https://{STORAGE_ACCOUNT}.blob.core.windows.net",
         credential=cred,
     )
-    return queue, blob
+    return queue, error_queue, blob
+
+
+def send_to_error_queue(error_queue, job, result, attempts):
+    """Manda o job falho para a fila de erro (rpa-jobs-erro) com os detalhes da
+    falha, preservando o payload original (empresas/arquivos) para RETRY posterior.
+    O arquivo de entrada NAO e apagado em caso de falha (fica para reprocessar)."""
+    payload = {
+        "job_id": job.get("job_id"),
+        "scheduled_at": job.get("scheduled_at"),
+        "empresas": job.get("empresas", []),       # original -> permite re-enfileirar
+        "callback_blob": job.get("callback_blob"),
+        "error": {
+            "status": result.get("status"),
+            "failed_at": now_iso(),
+            "attempts": attempts,
+            "empresas_result": result.get("empresas"),
+            "message": result.get("error") or result.get("message"),
+        },
+    }
+    try:
+        body = base64.b64encode(
+            json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
+        error_queue.send_message(body)
+        print(f"[worker]   {job.get('job_id')} -> fila de erro '{ERROR_QUEUE_NAME}' "
+              f"(retry depois)", flush=True)
+    except Exception as e:
+        print(f"[worker]   WARN nao enviou p/ fila de erro: {e}", flush=True)
+
+
+def delete_job_inputs(blob_svc, job):
+    """So no SUCESSO (DONE): apaga os blobs de entrada (rpa-files/<job>/...) e as
+    copias locais (C:\\rpa\\inbox\\<job>_<codigo>). Em falha, NADA e apagado."""
+    job_id = job.get("job_id")
+    for emp in job.get("empresas", []):
+        blob_path = emp.get("arquivo_blob", "")
+        if blob_path:
+            try:
+                container, _, name = blob_path.partition("/")
+                blob_svc.get_blob_client(container, name).delete_blob()
+                print(f"[worker]   input apagado: {blob_path}", flush=True)
+            except Exception as e:
+                print(f"[worker]   WARN delete input {blob_path}: {e}", flush=True)
+        d = os.path.join(INBOX_LOCAL, f"{job_id}_{emp.get('codigo')}")
+        if os.path.isdir(d):
+            shutil.rmtree(d, ignore_errors=True)
 
 
 def result_exists(blob_svc, job_id):
@@ -228,17 +273,18 @@ def compose_and_upload_video(blob_svc, job_id, codigo, record_dir):
             print(f"  [rec] make_video falhou: {(r.stderr or r.stdout)[-500:]}")
             return None
 
-        blob_name = f"{VIDEO_PREFIX}/{codigo}_{job_id}.mp4"
+        # Organizado POR EMPRESA: video/<empresa>/<job_id>.mp4
+        blob_name = f"{VIDEO_PREFIX}/{codigo}/{job_id}.mp4"
         with open(out_mp4, "rb") as fh:
             blob_svc.get_blob_client(VIDEO_CONTAINER, blob_name).upload_blob(
                 fh, overwrite=True,
                 content_settings=ContentSettings(content_type="video/mp4"))
-        # legenda .srt junto (mesmo nome)
+        # legenda .srt junto (mesmo caminho)
         srt = os.path.splitext(out_mp4)[0] + ".srt"
         if os.path.isfile(srt):
             with open(srt, "rb") as fh:
                 blob_svc.get_blob_client(
-                    VIDEO_CONTAINER, f"{VIDEO_PREFIX}/{codigo}_{job_id}.srt").upload_blob(
+                    VIDEO_CONTAINER, f"{VIDEO_PREFIX}/{codigo}/{job_id}.srt").upload_blob(
                     fh, overwrite=True,
                     content_settings=ContentSettings(content_type="text/plain; charset=utf-8"))
         print(f"  [rec] video no blob: {VIDEO_CONTAINER}/{blob_name}")
@@ -324,10 +370,10 @@ def main():
     print(f"[worker] singleton lock OK ({LOCK_PATH}, pid={os.getpid()})",
           flush=True)
 
-    queue, blob_svc = build_clients()
+    queue, error_queue, blob_svc = build_clients()
     print(f"[worker] started; account={STORAGE_ACCOUNT} queue={QUEUE_NAME} "
-          f"poll_sleep={POLL_EMPTY_SLEEP}s visibility={VISIBILITY_TIMEOUT}s",
-          flush=True)
+          f"error_queue={ERROR_QUEUE_NAME} poll_sleep={POLL_EMPTY_SLEEP}s "
+          f"visibility={VISIBILITY_TIMEOUT}s", flush=True)
 
     while True:
         try:
@@ -356,13 +402,15 @@ def main():
                 continue
 
             if msg.dequeue_count > MAX_DEQUEUE:
-                print(f"[worker]   {job_id} excedeu MAX_DEQUEUE; grava FAILED",
+                print(f"[worker]   {job_id} excedeu MAX_DEQUEUE; FAILED + fila de erro",
                       flush=True)
-                write_result(blob_svc, job_id, {
+                failed = {
                     "job_id": job_id, "status": "FAILED",
                     "error": "max_retries_exceeded",
                     "finished_at": now_iso(),
-                })
+                }
+                write_result(blob_svc, job_id, failed)
+                send_to_error_queue(error_queue, job, failed, msg.dequeue_count)
                 queue.delete_message(msg)
                 continue
 
@@ -370,6 +418,13 @@ def main():
             write_result(blob_svc, job_id, result)
             queue.delete_message(msg)
             print(f"[worker]   {job_id} -> {result['status']}", flush=True)
+
+            # SUCESSO total -> apaga o arquivo de entrada (blob + local).
+            # Qualquer falha (FAILED/PARTIAL) -> fila de erro p/ retry, mantendo o arquivo.
+            if result["status"] == "DONE":
+                delete_job_inputs(blob_svc, job)
+            else:
+                send_to_error_queue(error_queue, job, result, msg.dequeue_count)
 
         except Exception as e:
             print(f"[worker] ERROR processing msg id={getattr(msg,'id',None)}: "
